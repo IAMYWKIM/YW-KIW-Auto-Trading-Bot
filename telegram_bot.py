@@ -103,6 +103,7 @@ class TelegramBot:
         handlers = [
             ("start",          self.cmd_start),
             ("help",           self.cmd_help),
+            ("guide",          self.cmd_guide),   # 📱 모바일 가이드 (신규)
             ("status",         self.cmd_status),
             ("balance",        self.cmd_balance),
             ("scan",           self.cmd_scan),
@@ -234,7 +235,328 @@ class TelegramBot:
                 "  /scalp_summary 20260514 — 특정 날짜 상세\n"
                 "  /scalp_debug         — 봇 상태 진단\n"
             )
+        msg += "\n📱 <b>/guide</b> — 아이폰 최적화 인라인 가이드 (카테고리 버튼)"
         await update.message.reply_text(msg, parse_mode="HTML")
+
+    # ──────────────────────────────────────────────────────────
+    # /guide — 📱 아이폰 최적화 인라인 명령어 가이드
+    # ──────────────────────────────────────────────────────────
+
+    async def cmd_guide(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """
+        /guide — 📱 아이폰 최적화 인라인 명령어 가이드
+        카테고리별 버튼 메뉴 → 탭 한 번으로 해당 섹션 조회
+        앱 전환 없이 텔레그램 안에서 바로 참조 가능
+        """
+        if not is_authorized(update): return
+        args    = ctx.args or []
+        section = args[0].lower() if args else ""
+        if not section:
+            await self._guide_menu(update)
+        else:
+            guide_map = {
+                "info": self._guide_swing_info, "scan": self._guide_swing_scan,
+                "order": self._guide_swing_order, "config": self._guide_swing_config,
+                "scalp_info": self._guide_scalp_info, "scalp_ctrl": self._guide_scalp_ctrl,
+                "scalp_sum": self._guide_scalp_sum, "scalp_cfg": self._guide_scalp_cfg,
+                "params": self._guide_params, "scalp_params": self._guide_scalp_params,
+                "costs": self._guide_costs, "fib": self._guide_fib,
+            }
+            fn = guide_map.get(section)
+            if fn: await fn(update)
+            else:  await self._guide_menu(update)
+
+    async def _guide_menu(self, update):
+        text = (
+            "📱 <b>명령어 가이드</b>\n"
+            "버튼을 탭하면 해당 섹션으로 이동합니다\n\n"
+            "버전: <code>v2.1.0</code>  |  종가베팅 + 단타 통합"
+        )
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📊 종가베팅 조회",    callback_data="GUIDE:info"),
+             InlineKeyboardButton("🔍 스캔·분석",        callback_data="GUIDE:scan")],
+            [InlineKeyboardButton("💰 수동 주문",        callback_data="GUIDE:order"),
+             InlineKeyboardButton("⚙️ 종가베팅 설정",    callback_data="GUIDE:config")],
+            [InlineKeyboardButton("⚡ 단타 조회",        callback_data="GUIDE:scalp_info"),
+             InlineKeyboardButton("🎛️ 단타 제어",        callback_data="GUIDE:scalp_ctrl")],
+            [InlineKeyboardButton("📈 매매 요약",        callback_data="GUIDE:scalp_sum"),
+             InlineKeyboardButton("🔧 단타 설정",        callback_data="GUIDE:scalp_cfg")],
+            [InlineKeyboardButton("📋 종가베팅 파라미터",callback_data="GUIDE:params"),
+             InlineKeyboardButton("📋 단타 파라미터",    callback_data="GUIDE:scalp_params")],
+            [InlineKeyboardButton("💸 거래 비용 안내",   callback_data="GUIDE:costs"),
+             InlineKeyboardButton("📡 Fib 재진입 전략",  callback_data="GUIDE:fib")],
+        ])
+        # 명령어로 호출 시 → 새 메시지 전송
+        # 콜백 버튼으로 호출 시 → 기존 메시지 수정
+        if update.callback_query:
+            await update.callback_query.edit_message_text(
+                text, parse_mode="HTML", reply_markup=keyboard
+            )
+        else:
+            await update.message.reply_html(text, reply_markup=keyboard)
+
+    async def _guide_swing_info(self, update):
+        msg = (
+            "📊 <b>[ 종가베팅 — 정보 조회 ]</b>\n\n"
+            "<b>/start</b>  봇 시작 및 운영 스케줄 안내\n\n"
+            "<b>/status</b>  보유 포지션 + 평가손익\n"
+            "  → 잠금🔒/해제🔓 상태 + 인라인 매도 버튼\n\n"
+            "<b>/balance</b>  예수금 + 총평가금액 + 총손익\n\n"
+            "<b>/history</b> <code>[종목코드]</code>  매매 이력 (최근 10건)\n"
+            "  예) <code>/history</code> — 전체\n"
+            "  예) <code>/history 005930</code> — 삼성전자만\n\n"
+            "<b>/version</b> <code>[history]</code>  버전 + 변경 이력\n"
+            "  예) <code>/version history</code> — 전체 이력"
+        )
+        await self._guide_reply(update, msg, back="menu")
+
+    async def _guide_swing_scan(self, update):
+        msg = (
+            "🔍 <b>[ 종가베팅 — 스캔·분석 ]</b>\n\n"
+            "<b>/scan</b>  후보 종목 즉시 스캔 (10~30초)\n"
+            "  → 조건 A~G 필터 / 결과 자동 로그 저장\n"
+            "  → 14:30에 자동 실행\n\n"
+            "<b>/report</b> <code>[일수]</code>  과거 스캔 승률 분석\n"
+            "  예) <code>/report</code> — 최근 7일\n"
+            "  예) <code>/report 14</code> — 14일\n"
+            "  예) <code>/report 30</code> — 한 달\n\n"
+            "<b>/update_results</b> <code>[날짜]</code>  실제 등락 기록\n"
+            "  예) <code>/update_results</code> — 어제\n"
+            "  예) <code>/update_results 20260514</code>"
+        )
+        await self._guide_reply(update, msg, back="menu")
+
+    async def _guide_swing_order(self, update):
+        msg = (
+            "💰 <b>[ 종가베팅 — 수동 주문 ]</b>\n\n"
+            "<b>/buy</b> <code>종목코드 수량 가격</code>\n"
+            "  가격 0 = 시장가  (확인 버튼 있음)\n"
+            "  예) <code>/buy 005930 10 75000</code>\n"
+            "  예) <code>/buy 005930 10 0</code> — 시장가\n\n"
+            "<b>/sell</b> <code>종목코드 수량 가격</code>\n"
+            "  예) <code>/sell 005930 10 76000</code>\n"
+            "  예) <code>/sell 005930 10 0</code> — 시장가\n\n"
+            "<b>/lock</b> <code>종목코드</code>  당일 자동 매수 차단\n"
+            "  예) <code>/lock 005930</code>\n\n"
+            "<b>/unlock</b> <code>종목코드</code>  잠금 해제\n"
+            "  → 15:30에 전체 자동 초기화"
+        )
+        await self._guide_reply(update, msg, back="menu")
+
+    async def _guide_swing_config(self, update):
+        msg = (
+            "⚙️ <b>[ 종가베팅 — /config 설정 ]</b>\n\n"
+            "<b>조회</b>\n"
+            "<code>/config show</code>       — 전체\n"
+            "<code>/config show scan</code>  — 스캔 조건\n"
+            "<code>/config show entry</code> — 진입 조건\n"
+            "<code>/config show risk</code>  — 리스크\n\n"
+            "<b>자주 쓰는 변경</b>\n"
+            "<code>/config set risk.stop_loss_pct -4.0</code>  손절 -4%\n"
+            "<code>/config set entry.max_positions 5</code>    최대 5종목\n"
+            "<code>/config set entry.position_size_pct 0</code> 자동매수 차단\n"
+            "<code>/config reset</code>  기본값 초기화"
+        )
+        await self._guide_reply(update, msg, back="menu",
+                                extra_btn=("📋 전체 파라미터", "GUIDE:params"))
+
+    async def _guide_scalp_info(self, update):
+        msg = (
+            "⚡ <b>[ 단타 — 정보 조회 ]</b>\n\n"
+            "<b>/scalp_status</b>  포지션 현황\n"
+            "  → 평가손익 / 장중 고점 / 보유 시간\n\n"
+            "<b>/scalp_scan</b>  급등 종목 즉시 스캔 (~15초)\n"
+            "  → 장외 시간에도 동작\n\n"
+            "<b>/scalp_market</b>  시장 상황\n"
+            "  → KOSPI/KOSDAQ ETF 등락률\n"
+            "  → 외인 매수 강도 점수\n"
+            "  → STOP/CAUTION/NORMAL/BULLISH\n\n"
+            "<b>/scalp_fib</b>  피보나치 감시 현황\n"
+            "  → 손절 후 Fib 레벨 대기 종목\n\n"
+            "<b>/scalp_debug</b>  봇 상태 진단\n"
+            "  → 매수 안 될 때 원인 파악"
+        )
+        await self._guide_reply(update, msg, back="menu",
+                                extra_btn=("📡 Fib 전략", "GUIDE:fib"))
+
+    async def _guide_scalp_ctrl(self, update):
+        msg = (
+            "🎛️ <b>[ 단타 — 제어 명령 ]</b>\n\n"
+            "<b>/scalp_stop</b>  신규 진입 ON/OFF 토글\n"
+            "  → 중단 중에도 청산 감시는 계속\n\n"
+            "<b>/scalp_exit_all</b>  전체 즉시 시장가 청산\n"
+            "  ⚠️ 긴급 리스크 관리 시\n\n"
+            "─────────────────\n"
+            "<b>자동 강제청산 스케줄</b>\n"
+            "15:10 — 경고 알림\n"
+            "15:20 — 전량 자동 강제청산\n\n"
+            "<b>시장 필터 등급별 제한</b>\n"
+            "🛑 STOP → 진입 0개\n"
+            "⚠️ CAUTION → 최대 1개\n"
+            "🟢 NORMAL → 최대 2개\n"
+            "🚀 BULLISH → 최대 3개"
+        )
+        await self._guide_reply(update, msg, back="menu")
+
+    async def _guide_scalp_sum(self, update):
+        msg = (
+            "📈 <b>[ 단타 — /scalp_summary ]</b>\n\n"
+            "<code>/scalp_summary</code>           버튼 선택 메뉴\n"
+            "<code>/scalp_summary daily</code>     오늘 요약\n"
+            "<code>/scalp_summary weekly</code>    이번 주 요약\n"
+            "<code>/scalp_summary monthly</code>   이번 달 요약\n"
+            "<code>/scalp_summary YYYYMMDD</code>  날짜별 상세\n\n"
+            "상세 내역 포함 항목:\n"
+            "  매수가 / 매도가 / 수익률 / 손익\n"
+            "  투자금 / 보유시간 / 청산사유\n\n"
+            "예) <code>/scalp_summary 20260515</code>"
+        )
+        await self._guide_reply(update, msg, back="menu")
+
+    async def _guide_scalp_cfg(self, update):
+        msg = (
+            "🔧 <b>[ 단타 — /scalp_config ]</b>\n\n"
+            "<b>조회</b>\n"
+            "<code>/scalp_config show</code>        전체\n"
+            "<code>/scalp_config show exit</code>   청산 조건\n"
+            "<code>/scalp_config show risk</code>   리스크\n\n"
+            "<b>자주 쓰는 변경</b>\n"
+            "<code>/scalp_config set scan.entry_end_time 14:30</code>\n"
+            "<code>/scalp_config set exit.stop_loss_pct -2.0</code>\n"
+            "<code>/scalp_config set exit.take_profit_pct 3.0</code>\n"
+            "<code>/scalp_config set entry.max_positions 2</code>\n"
+            "<code>/scalp_config set entry.use_vwap_filter false</code>\n"
+            "<code>/scalp_config reset</code>  기본값 초기화"
+        )
+        await self._guide_reply(update, msg, back="menu",
+                                extra_btn=("📋 단타 파라미터", "GUIDE:scalp_params"))
+
+    async def _guide_params(self, update):
+        msg = (
+            "📋 <b>[ 종가베팅 파라미터 ]</b>\n"
+            "<i>/config set [키] [값]</i>\n\n"
+            "<b>SCAN</b>\n"
+            "<code>scan.min_trading_value</code>   <i>10000000000</i>\n"
+            "<code>scan.surge_threshold_e</code>   <i>9.0</i>\n"
+            "<code>scan.envelope_period</code>     <i>20</i>\n"
+            "<code>scan.envelope_band_pct</code>   <i>20.0</i>\n"
+            "<code>scan.volume_ratio_min</code>    <i>1.5</i>\n\n"
+            "<b>ENTRY</b>\n"
+            "<code>entry.pullback_min_pct</code>   <i>-10.0</i>\n"
+            "<code>entry.pullback_max_pct</code>   <i>-0.5</i>\n"
+            "<code>entry.entry_start_time</code>   <i>15:10</i>\n"
+            "<code>entry.max_positions</code>      <i>3</i>\n"
+            "<code>entry.position_size_pct</code>  <i>15</i>\n"
+            "<code>entry.rsi_min</code>            <i>30</i>\n"
+            "<code>entry.rsi_max</code>            <i>80</i>\n\n"
+            "<b>RISK</b>\n"
+            "<code>risk.stop_loss_pct</code>       <i>-3.0</i>\n"
+            "<code>risk.take_profit_pct</code>     <i>5.0</i>\n"
+            "<code>risk.trailing_gap_pct</code>    <i>2.0</i>\n"
+            "<code>risk.force_sell_time</code>     <i>15:00</i>\n\n"
+            "<b>SELL</b>\n"
+            "<code>sell.nxt_gap_target_pct</code>  <i>2.0</i>\n"
+            "<code>sell.morning_target_pct</code>  <i>3.0</i>"
+        )
+        await self._guide_reply(update, msg, back="menu")
+
+    async def _guide_scalp_params(self, update):
+        msg = (
+            "📋 <b>[ 단타 파라미터 ]</b>\n"
+            "<i>/scalp_config set [키] [값]</i>\n\n"
+            "<b>SCAN</b>\n"
+            "<code>scan.min_rise_pct</code>         <i>3.0</i>\n"
+            "<code>scan.max_rise_pct</code>          <i>20.0</i>\n"
+            "<code>scan.min_trading_value</code>     <i>5000000000</i>\n"
+            "<code>scan.volume_ratio_min</code>      <i>3.0</i>\n"
+            "<code>scan.entry_end_time</code>        <i>14:30</i>\n"
+            "<code>scan.api_delay_sec</code>         <i>0.5</i>\n\n"
+            "<b>ENTRY</b>\n"
+            "<code>entry.max_positions</code>        <i>3</i>\n"
+            "<code>entry.position_size_pct</code>    <i>20</i>\n"
+            "<code>entry.use_vwap_filter</code>      <i>true</i>\n"
+            "<code>entry.cooldown_sec</code>         <i>300</i>\n\n"
+            "<b>EXIT</b>\n"
+            "<code>exit.take_profit_pct</code>       <i>2.5</i>  → 실질+2.29%\n"
+            "<code>exit.stop_loss_pct</code>         <i>-1.5</i> → 실질-1.71%\n"
+            "<code>exit.partial_profit_pct</code>    <i>1.5</i>\n"
+            "<code>exit.trailing_stop</code>         <i>true</i>\n"
+            "<code>exit.trailing_gap_pct</code>      <i>1.0</i>\n"
+            "<code>exit.trailing_activate_pct</code> <i>1.0</i>\n"
+            "<code>exit.force_exit_time</code>       <i>15:20</i>\n"
+            "<code>exit.time_stop_minutes</code>     <i>60</i>\n\n"
+            "<b>RISK</b>\n"
+            "<code>risk.daily_loss_limit_pct</code>  <i>-3.0</i>\n"
+            "<code>risk.max_consecutive_loss</code>  <i>3</i>\n"
+            "<code>risk.reserve_cash_pct</code>      <i>10</i>"
+        )
+        await self._guide_reply(update, msg, back="menu",
+                                extra_btn=("💸 거래 비용", "GUIDE:costs"))
+
+    async def _guide_costs(self, update):
+        msg = (
+            "💸 <b>[ 거래 비용 안내 ]</b>\n\n"
+            "수수료 (매수):  <code>+0.015%</code>\n"
+            "수수료 (매도):  <code>+0.015%</code>\n"
+            "거래세 (매도):  <code>+0.180%</code>\n"
+            "━━━━━━━━━━━━━━━━\n"
+            "Round-trip 합계: <b>~0.21%</b>\n\n"
+            "<b>실질 손절/익절</b>\n"
+            "손절 <code>-1.5%</code> → 실질 <b>-1.71%</b>\n"
+            "익절 <code>+2.5%</code> → 실질 <b>+2.29%</b>\n"
+            "손익비: 2.29 ÷ 1.71 ≈ <b>1.34</b>\n\n"
+            "매도 알림:\n"
+            "총손익 / 수수료+세금 / <b>실손익</b>\n"
+            "3가지 분리 표시\n\n"
+            "⚠️ 승률이 낮을 때는\n"
+            "거래 횟수를 줄이는 것이 최선"
+        )
+        await self._guide_reply(update, msg, back="menu")
+
+    async def _guide_fib(self, update):
+        msg = (
+            "📡 <b>[ 피보나치 재진입 전략 ]</b>\n\n"
+            "손절/트레일링 체결 시 자동 시작\n\n"
+            "<b>① FibWatcher 자동 생성</b>\n"
+            "  갭상승 주도주 → 전일종가 기준\n"
+            "  일반 급등주 → 당일저점 기준\n\n"
+            "<b>② 10분 대기</b> (노이즈 회피)\n\n"
+            "<b>③ 30초마다 Fib 레벨 감시</b>\n"
+            "  갭상승: Fib <b>0.236 / 0.382</b>\n"
+            "  일반:   Fib <b>0.382 / 0.500</b>\n\n"
+            "<b>④ 재진입 조건 (모두 충족)</b>\n"
+            "  Fib 레벨 ±0.5% 이내 진입\n"
+            "  해당 구간 내 저점 형성\n"
+            "  저점 대비 <b>+0.3% 반등</b> 확인\n"
+            "  현재가 &lt; 손절가\n\n"
+            "<b>/scalp_fib</b> — 감시 현황 조회"
+        )
+        await self._guide_reply(update, msg, back="menu",
+                                extra_btn=("⚡ 단타 조회", "GUIDE:scalp_info"))
+
+    async def _guide_reply(self, update, msg: str,
+                            back: str = "menu",
+                            extra_btn: tuple = None):
+        """가이드 섹션 응답 공통 헬퍼
+        - 명령어(/guide info) 호출 시: 새 메시지 전송
+        - 버튼 콜백 호출 시: 기존 메시지 수정 (edit)
+        """
+        buttons = [InlineKeyboardButton("◀ 메뉴로", callback_data=f"GUIDE:{back}")]
+        if extra_btn:
+            buttons.append(InlineKeyboardButton(extra_btn[0], callback_data=extra_btn[1]))
+        keyboard = InlineKeyboardMarkup([buttons])
+
+        if update.callback_query:
+            # 콜백 버튼 → 기존 메시지를 해당 섹션 내용으로 교체
+            try:
+                await update.callback_query.edit_message_text(
+                    msg, parse_mode="HTML", reply_markup=keyboard
+                )
+            except Exception as e:
+                logger.debug(f"[Guide] edit_message_text 실패: {e}")
+        else:
+            # /guide 명령어 → 새 메시지 전송
+            await update.message.reply_html(msg, reply_markup=keyboard)
 
     # ──────────────────────────────────────────────────────────
     # /status — 종가베팅 포지션
@@ -946,10 +1268,32 @@ class TelegramBot:
                     f"❌ 매도 실패: {result['raw'].get('return_msg', '오류')}"
                 )
 
+        elif data.startswith("GUIDE:"):
+            # 가이드 메뉴 — 섹션별 라우팅
+            parts   = data.split(":", 1)
+            section = parts[1] if len(parts) > 1 else "menu"
+            guide_map = {
+                "menu":         self._guide_menu,
+                "info":         self._guide_swing_info,
+                "scan":         self._guide_swing_scan,
+                "order":        self._guide_swing_order,
+                "config":       self._guide_swing_config,
+                "scalp_info":   self._guide_scalp_info,
+                "scalp_ctrl":   self._guide_scalp_ctrl,
+                "scalp_sum":    self._guide_scalp_sum,
+                "scalp_cfg":    self._guide_scalp_cfg,
+                "params":       self._guide_params,
+                "scalp_params": self._guide_scalp_params,
+                "costs":        self._guide_costs,
+                "fib":          self._guide_fib,
+            }
+            fn = guide_map.get(section, self._guide_menu)
+            await fn(update)   # ← 여기서 반드시 return (다음 블록 실행 방지)
+            return
+
         elif data == "CONFIG:RESET:CONFIRM":
             self.scfg.reset_to_defaults()
             await query.edit_message_text("✅ 종가베팅 설정 기본값으로 초기화")
-        elif data == "CONFIG:RESET:CANCEL":
             await query.edit_message_text("❌ 초기화 취소")
         elif data == "CANCEL":
             await query.edit_message_text("❌ 취소")
