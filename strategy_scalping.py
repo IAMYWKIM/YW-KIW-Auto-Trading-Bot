@@ -48,9 +48,11 @@ DATA_DIR = Path("data")
 DATA_DIR.mkdir(exist_ok=True)
 
 # 포지션 영속화 파일
-POSITIONS_FILE = DATA_DIR / "scalp_positions.json"
+POSITIONS_FILE  = DATA_DIR / "scalp_positions.json"
 # 당일 매매 이력 (쿨다운/손절 이력)
-DAILY_LOG_FILE = DATA_DIR / "scalp_daily_log.json"
+DAILY_LOG_FILE  = DATA_DIR / "scalp_daily_log.json"
+# [v1.3] 하이브리드 모드 수동 감시 목록
+WATCHLIST_FILE  = DATA_DIR / "scalp_watchlist.json"
 
 
 def _write_json_atomic(path: Path, data) -> bool:
@@ -169,8 +171,12 @@ class ScalpStrategy:
         self._cooldown: dict[str, float] = {}
 
         # [v1.2] FibReentryManager — 손절 종목 피보나치 재진입 감시
-        # (외부에서 주입: scalp_main에서 FibReentryManager 인스턴스 전달)
         self.fib_mgr = None   # main.py에서 fib_mgr 주입
+
+        # [v1.3] 하이브리드 모드 — 유저 수동 감시 목록
+        # {code: {"code", "name", "added_at", "active": bool}}
+        # JSON 영속화 → 봇 재시작 후에도 유지
+        self._watchlist: dict[str, dict] = _read_json_safe(WATCHLIST_FILE, {})
 
         # 당일 손익 추적
         self._daily_pnl: int     = 0
@@ -666,6 +672,175 @@ class ScalpStrategy:
             f"[ScalpStrategy] 일일 초기화 완료 "
             f"(시작 현금: {start_cash:,}원)"
         )
+
+    def init_daily(self, start_cash: int):
+        """장 시작 전 일일 상태 초기화"""
+        self._daily_pnl        = 0
+        self._daily_start_cash = start_cash
+        self._consecutive_loss = 0
+        if self.fib_mgr:
+            self.fib_mgr.init_daily()   # Fib 감시 목록 초기화
+        logger.info(
+            f"[ScalpStrategy] 일일 초기화 완료 "
+            f"(시작 현금: {start_cash:,}원)"
+        )
+
+    # ──────────────────────────────────────────────────────────
+    # [v1.3] 하이브리드 모드 — 수동 감시 목록 관리
+    # ──────────────────────────────────────────────────────────
+
+    def watchlist_add(self, code: str, name: str = "") -> dict:
+        """
+        수동 감시 목록에 종목 추가.
+        이미 있으면 active=True 로 재활성화.
+        이름 미입력 시 broker API로 자동 조회.
+
+        Returns: {"ok": bool, "msg": str, "item": dict}
+        """
+        now_str = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
+
+        if code in self._watchlist:
+            item = self._watchlist[code]
+            if item["active"]:
+                return {"ok": False, "msg": f"이미 감시 중: {item['name']}({code})", "item": item}
+            item["active"]     = True
+            item["added_at"]   = now_str
+            item["stopped_at"] = ""
+            if name:
+                item["name"] = name
+        else:
+            if not name:
+                try:
+                    info = self.broker.get_stock_info(code)
+                    name = info.get("name", code)
+                except Exception:
+                    name = code
+            item = {
+                "code": code, "name": name,
+                "added_at": now_str, "stopped_at": "",
+                "active": True, "note": "수동 추가",
+            }
+            self._watchlist[code] = item
+
+        _write_json_atomic(WATCHLIST_FILE, self._watchlist)
+        logger.info(f"[ScalpStrategy] 감시 추가: {name}({code})")
+        return {"ok": True, "msg": f"✅ {name}({code}) 감시 시작", "item": item}
+
+    def watchlist_remove(self, code: str) -> dict:
+        """
+        수동 감시 목록에서 종목 비활성화 (이력 보존).
+        보유 중이면 포지션은 유지하고 신규 진입만 차단.
+
+        Returns: {"ok": bool, "msg": str}
+        """
+        if code not in self._watchlist:
+            return {"ok": False, "msg": f"❌ 감시 목록에 없음: {code}"}
+        item = self._watchlist[code]
+        if not item["active"]:
+            return {"ok": False, "msg": f"이미 중지됨: {item['name']}({code})"}
+        item["active"]     = False
+        item["stopped_at"] = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
+        _write_json_atomic(WATCHLIST_FILE, self._watchlist)
+        name = item["name"]
+        if code in self._positions:
+            msg = (
+                f"⏸ {name}({code}) 신규 진입 중단\n"
+                f"현재 보유 포지션은 기존 청산 로직으로 계속 관리됩니다"
+            )
+        else:
+            msg = f"⏹ {name}({code}) 감시 중단"
+        logger.info(f"[ScalpStrategy] 감시 중단: {name}({code})")
+        return {"ok": True, "msg": msg}
+
+    def watchlist_get_active(self) -> list[dict]:
+        """현재 활성화된 수동 감시 종목 목록"""
+        return [v for v in self._watchlist.values() if v.get("active", False)]
+
+    def watchlist_all(self) -> list[dict]:
+        """전체 목록 (비활성 포함, 최신순)"""
+        return sorted(
+            self._watchlist.values(),
+            key=lambda x: x.get("added_at", ""), reverse=True
+        )
+
+    def is_in_watchlist(self, code: str) -> bool:
+        """활성화된 수동 감시 종목인지 확인"""
+        return code in self._watchlist and self._watchlist[code].get("active", False)
+
+    def build_watchlist_candidate(self, code: str) -> dict | None:
+        """
+        수동 감시 종목을 scanner candidate 형식으로 변환.
+        현재 시세를 broker에서 조회하여 채움.
+        source="MANUAL" 로 마킹 → 스캐너 필터 우회.
+
+        Returns: candidate dict or None
+        """
+        if not self.is_in_watchlist(code):
+            return None
+        try:
+            info = self.broker.get_stock_info(code)
+            if not info or info.get("cur_price", 0) <= 0:
+                return None
+            item       = self._watchlist[code]
+            cur_price  = info["cur_price"]
+            prev_close = info.get("prev_close", 0)
+            rise_pct   = (
+                (cur_price - prev_close) / prev_close * 100
+                if prev_close > 0 else 0.0
+            )
+            return {
+                "code":          code,
+                "name":          item["name"],
+                "cur_price":     cur_price,
+                "prev_close":    prev_close,
+                "rise_pct":      round(rise_pct, 2),
+                "volume":        info.get("volume", 0),
+                "volume_ratio":  0,
+                "trading_value": info.get("trading_value", 0),
+                "vwap":          0,         # main.py에서 선택적으로 계산
+                "source":        "MANUAL",  # 수동 추가 식별자
+                "score":         70,        # 기본 점수
+                "scan_time":     datetime.now(KST).strftime("%H:%M"),
+                "_manual":       True,      # 스캐너 필터 우회 플래그
+            }
+        except Exception as e:
+            logger.warning(f"[ScalpStrategy] 수동 종목 시세 조회 실패 {code}: {e}")
+            return None
+
+    def format_watchlist_message(self) -> str:
+        """수동 감시 목록 텔레그램 메시지 포맷"""
+        active  = self.watchlist_get_active()
+        stopped = [v for v in self._watchlist.values() if not v.get("active")]
+
+        lines = ["⚡ <b>[ 하이브리드 감시 목록 ]</b>\n"]
+
+        if not active and not stopped:
+            lines.append("감시 중인 종목 없음\n/scalp_add [종목코드] 로 추가")
+            return "\n".join(lines)
+
+        if active:
+            lines.append(f"<b>▶ 감시 중 ({len(active)}개)</b>")
+            for item in active:
+                # 현재 보유 중이면 표시
+                held = "📌 보유중" if item["code"] in self._positions else ""
+                lines.append(
+                    f"  • <b>{item['name']}({item['code']})</b> {held}\n"
+                    f"    추가: {item['added_at'][11:16]}"
+                )
+
+        if stopped:
+            lines.append(f"\n<b>⏹ 중단됨 ({len(stopped)}개)</b>")
+            for item in list(stopped)[:3]:   # 최근 3개만
+                lines.append(
+                    f"  • {item['name']}({item['code']}) "
+                    f"— {item.get('stopped_at','')[:16]}"
+                )
+
+        lines.append(
+            "\n<i>/scalp_add [코드] — 추가\n"
+            "/scalp_remove [코드] — 중단</i>"
+        )
+        return "\n".join(lines)
 
     def daily_summary(self) -> str:
         """당일 결산 요약 텍스트 (텔레그램 전송용)"""

@@ -120,15 +120,19 @@ class TelegramBot:
         # ── 단타 명령어 (컴포넌트 주입된 경우에만 등록) ──────
         if self.scanner and self.scalp_strategy:
             handlers += [
-                ("scalp_status",   self.cmd_scalp_status),
-                ("scalp_scan",     self.cmd_scalp_scan),
-                ("scalp_config",   self.cmd_scalp_config),
-                ("scalp_stop",     self.cmd_scalp_stop),
-                ("scalp_exit_all", self.cmd_scalp_exit_all),
-                ("scalp_debug",    self.cmd_scalp_debug),
-                ("scalp_summary",  self.cmd_scalp_summary),
-                ("scalp_market",   self.cmd_scalp_market),
-                ("scalp_fib",      self.cmd_scalp_fib),   # Fib 감시 현황
+                ("scalp_status",    self.cmd_scalp_status),
+                ("scalp_scan",      self.cmd_scalp_scan),
+                ("scalp_config",    self.cmd_scalp_config),
+                ("scalp_stop",      self.cmd_scalp_stop),
+                ("scalp_exit_all",  self.cmd_scalp_exit_all),
+                ("scalp_debug",     self.cmd_scalp_debug),
+                ("scalp_summary",   self.cmd_scalp_summary),
+                ("scalp_market",    self.cmd_scalp_market),
+                ("scalp_fib",       self.cmd_scalp_fib),
+                # ── [v1.3] 하이브리드 모드 수동 감시 ──────────────
+                ("scalp_add",       self.cmd_scalp_add),
+                ("scalp_remove",    self.cmd_scalp_remove),
+                ("scalp_watchlist", self.cmd_scalp_watchlist),
             ]
             logger.info("[TelegramBot] 단타 명령어 등록 완료")
 
@@ -225,17 +229,18 @@ class TelegramBot:
                 "  /scalp_scan          — 급등 종목 즉시 스캔\n"
                 "  /scalp_stop          — 신규 진입 ON/OFF\n"
                 "  /scalp_exit_all      — 전량 즉시 청산\n"
+                "  /scalp_market        — 시장 상황 조회\n"
+                "  /scalp_fib           — Fib 재진입 감시 현황\n"
                 "  /scalp_config show   — 단타 설정 조회\n"
                 "  /scalp_config set [키] [값]\n"
-                "  /scalp_config reset  — 기본값 초기화\n"
-                "  /scalp_summary       — 매매 요약 (일/주/월)\n"
-                "  /scalp_summary daily   — 오늘 요약\n"
-                "  /scalp_summary weekly  — 이번 주 요약\n"
-                "  /scalp_summary monthly — 이번 달 요약\n"
-                "  /scalp_summary 20260514 — 특정 날짜 상세\n"
+                "  /scalp_summary [daily|weekly|monthly|날짜]\n"
                 "  /scalp_debug         — 봇 상태 진단\n"
+                "\n<b>── 하이브리드 (수동 주도주 지정) ──</b>\n"
+                "  /scalp_add [코드]    — 주도주 수동 추가\n"
+                "  /scalp_remove [코드] — 감시 중단\n"
+                "  /scalp_watchlist     — 수동 감시 목록\n"
             )
-        msg += "\n📱 <b>/guide</b> — 아이폰 최적화 인라인 가이드 (카테고리 버튼)"
+        msg += "\n📱 <b>/guide</b> — 아이폰 최적화 인라인 가이드"
         await update.message.reply_text(msg, parse_mode="HTML")
 
     # ──────────────────────────────────────────────────────────
@@ -1123,6 +1128,136 @@ class TelegramBot:
             await update.message.reply_text("⚠️ Fib 매니저가 초기화되지 않았습니다.")
             return
         msg = self.scalp_strategy.fib_mgr.format_for_telegram()
+        await update.message.reply_html(msg)
+
+    # ──────────────────────────────────────────────────────────
+    # [v1.3] 하이브리드 모드 — 수동 감시 명령어
+    # ──────────────────────────────────────────────────────────
+
+    async def cmd_scalp_add(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """
+        /scalp_add [종목코드] [종목명(선택)]
+        당일 주도주를 직접 지정하여 단타 감시 목록에 추가
+
+        예) /scalp_add 005930
+            /scalp_add 005930 삼성전자
+        """
+        if not is_authorized(update): return
+        if not self.scalp_strategy:
+            await update.message.reply_text("⚠️ 단타 전략이 초기화되지 않았습니다.")
+            return
+
+        args = ctx.args or []
+        if not args:
+            await update.message.reply_html(
+                "📌 <b>사용법</b>\n"
+                "<code>/scalp_add [종목코드]</code>\n"
+                "<code>/scalp_add [종목코드] [종목명]</code>\n\n"
+                "예) <code>/scalp_add 005930</code>\n"
+                "예) <code>/scalp_add 247540 에코프로비엠</code>\n\n"
+                "추가된 종목은 장중 자동 스캔 종목과 동일한 "
+                "단타 로직으로 매매됩니다."
+            )
+            return
+
+        code = args[0].strip().zfill(6)    # 6자리 패딩
+        name = args[1] if len(args) > 1 else ""
+
+        await update.message.reply_text(f"🔍 {code} 종목 정보 조회 중...")
+        try:
+            result = self.scalp_strategy.watchlist_add(code, name)
+        except Exception as e:
+            await update.message.reply_text(f"❌ 오류: {e}")
+            return
+
+        if result["ok"]:
+            item = result["item"]
+            cur  = 0
+            try:
+                info = self.broker.get_stock_info(code)
+                cur  = info.get("cur_price", 0)
+            except Exception:
+                pass
+
+            msg = (
+                f"✅ <b>하이브리드 감시 추가</b>\n\n"
+                f"📌 종목: <b>{item['name']}({code})</b>\n"
+                f"💰 현재가: {cur:,}원\n\n"
+                f"이 종목은 다음 30초 루프부터 자동으로 매수 시도합니다.\n"
+                f"진입 조건: 포지션 여유 + 현금 + 진입 마감 시각 이내\n\n"
+                f"<i>/scalp_remove {code} — 감시 중단\n"
+                f"/scalp_watchlist — 전체 목록 확인</i>"
+            )
+            await update.message.reply_html(msg)
+        else:
+            await update.message.reply_text(result["msg"])
+
+    async def cmd_scalp_remove(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """
+        /scalp_remove [종목코드]
+        수동 감시 종목 중단 (보유 포지션은 유지, 신규 진입만 차단)
+
+        예) /scalp_remove 005930
+        """
+        if not is_authorized(update): return
+        if not self.scalp_strategy:
+            await update.message.reply_text("⚠️ 단타 전략이 초기화되지 않았습니다.")
+            return
+
+        args = ctx.args or []
+        if not args:
+            await update.message.reply_html(
+                "📌 <b>사용법</b>\n"
+                "<code>/scalp_remove [종목코드]</code>\n\n"
+                "예) <code>/scalp_remove 005930</code>\n\n"
+                "보유 중인 포지션은 유지되고\n"
+                "신규 진입만 중단됩니다."
+            )
+            return
+
+        code   = args[0].strip().zfill(6)
+        result = self.scalp_strategy.watchlist_remove(code)
+        if result["ok"]:
+            await update.message.reply_html(
+                f"<b>하이브리드 감시 중단</b>\n\n{result['msg']}\n\n"
+                f"<i>/scalp_watchlist — 전체 목록 확인</i>"
+            )
+        else:
+            await update.message.reply_text(result["msg"])
+
+    async def cmd_scalp_watchlist(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """
+        /scalp_watchlist
+        수동 감시 목록 전체 조회 (활성/중단 포함)
+        """
+        if not is_authorized(update): return
+        if not self.scalp_strategy:
+            await update.message.reply_text("⚠️ 단타 전략이 초기화되지 않았습니다.")
+            return
+
+        msg = self.scalp_strategy.format_watchlist_message()
+
+        # 활성 종목에 대해 실시간 현재가 추가
+        active = self.scalp_strategy.watchlist_get_active()
+        if active:
+            price_lines = ["\n<b>📊 실시간 현재가</b>"]
+            for item in active:
+                try:
+                    info  = self.broker.get_stock_info(item["code"])
+                    cur   = info.get("cur_price", 0)
+                    flu   = info.get("flu_rt", "0")
+                    sign  = "🔺" if float(flu) >= 0 else "🔻"
+                    held  = "📌" if item["code"] in [
+                        p.code for p in self.scalp_strategy.get_positions()
+                    ] else "  "
+                    price_lines.append(
+                        f"{held} {item['name']}({item['code']}): "
+                        f"<b>{cur:,}원</b> {sign}{flu}%"
+                    )
+                except Exception:
+                    price_lines.append(f"  {item['name']}({item['code']}): 조회 실패")
+            msg += "\n" + "\n".join(price_lines)
+
         await update.message.reply_html(msg)
 
     async def cmd_scalp_debug(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):

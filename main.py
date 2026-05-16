@@ -521,6 +521,77 @@ async def job_scalp_loop():
                     f"Fib{fib_ratio} +{bounce:.2f}% {qty}주 @{price:,}원"
                 )
 
+        # ── [v1.3] 하이브리드 — 수동 감시 종목 진입 시도 ───────
+        # 스캐너 필터를 우회하고 유저가 직접 지정한 종목을 단타 로직으로 매매
+        watchlist_active = scalp_strategy.watchlist_get_active()
+        if watchlist_active:
+            # 가용 현금 조회 (수동 종목도 동일하게 필요)
+            try:
+                wl_balance = await asyncio.to_thread(broker.get_balance)
+                wl_cash    = wl_balance["cash"] or await asyncio.to_thread(broker.get_deposit)
+            except Exception:
+                wl_cash = 0
+
+            for wl_item in watchlist_active:
+                wl_code = wl_item["code"]
+                wl_name = wl_item["name"]
+
+                # 이미 보유 중이면 신규 진입 스킵 (청산 감시는 위쪽 루프에서 처리됨)
+                if wl_code in scalp_strategy.held_codes():
+                    continue
+
+                # Fib 감시 중이면 스킵 (Fib 신호 대기)
+                if fib_mgr.is_watching(wl_code):
+                    logger.debug(f"[Scalp][수동] {wl_code} Fib 대기 중 — 스킵")
+                    continue
+
+                # 최대 포지션 체크
+                if len(scalp_strategy.held_codes()) >= effective_max:
+                    break
+
+                # 실시간 시세 조회 → candidate 형식으로 변환
+                wl_candidate = await asyncio.to_thread(
+                    scalp_strategy.build_watchlist_candidate, wl_code
+                )
+                if not wl_candidate:
+                    logger.debug(f"[Scalp][수동] {wl_code} 시세 조회 실패")
+                    continue
+
+                # 수동 종목은 스캐너 필터(상승률/거래대금)를 우회하고
+                # 진입 조건(포지션 수/현금/쿨다운/시간)만 체크
+                entry_sig = scalp_strategy.check_entry(wl_candidate, wl_cash)
+                if not entry_sig["signal"]:
+                    logger.info(
+                        f"[Scalp][수동] {wl_name}({wl_code}) "
+                        f"진입 거부: {entry_sig['reason']}"
+                    )
+                    continue
+
+                qty   = entry_sig["qty"]
+                price = wl_candidate["cur_price"]
+
+                result = await asyncio.to_thread(
+                    broker.buy_order, wl_code, qty, 0, "3"
+                )
+                if result["success"]:
+                    scalp_strategy.add_position(
+                        wl_code, wl_name, qty, price,
+                        vwap_at_buy=wl_candidate.get("vwap", 0.0)
+                    )
+                    await bot.notify_scalp_buy(
+                        wl_code, wl_name, qty, price, wl_candidate
+                    )
+                    wl_cash -= price * qty
+                    logger.info(
+                        f"[Scalp][수동] 매수 완료: {wl_name}({wl_code}) "
+                        f"{qty}주 @{price:,}원"
+                    )
+                else:
+                    logger.error(
+                        f"[Scalp][수동] 매수 실패: {wl_code} "
+                        f"— {result['raw'].get('return_msg','')}"
+                    )
+
         # ── 일반 신규 진입 스캔 ───────────────────────────────────
         candidates = await asyncio.to_thread(
             scalp_scanner.scan,
