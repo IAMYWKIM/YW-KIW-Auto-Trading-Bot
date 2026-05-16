@@ -1094,6 +1094,19 @@ class TelegramBot:
     async def cmd_scalp_market(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         """/scalp_market — 현재 시장 상황 조회"""
         if not is_authorized(update): return
+        import pytz
+        from datetime import datetime as _dt
+        KST = pytz.timezone("Asia/Seoul")
+        now = _dt.now(KST)
+        wd  = now.weekday()
+        if wd >= 5:
+            day_str = "토요일" if wd == 5 else "일요일"
+            await update.message.reply_text(
+                f"📴 오늘은 {day_str}입니다.\n"
+                f"단타봇은 평일 장 중(09:00~15:25)에만 동작합니다.\n"
+                f"월요일 08:50에 자동으로 재개됩니다."
+            )
+            return
         await update.message.reply_text("📡 시장 상황 조회 중...")
         try:
             from market_filter import MarketFilter

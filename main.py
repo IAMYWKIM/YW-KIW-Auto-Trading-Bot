@@ -50,6 +50,70 @@ from strategy_scalping import ScalpStrategy
 from market_filter import MarketFilter
 from fib_reentry import FibReentryManager
 
+
+# ──────────────────────────────────────────────────────────────
+# 거래일 판별 — 주말 + 한국 공휴일 체크
+# ──────────────────────────────────────────────────────────────
+
+# 한국 증권시장 공휴일 (매년 초 업데이트 필요)
+# 출처: 한국거래소(KRX) 공식 휴장일 기준
+_KRX_HOLIDAYS: set[str] = {
+    # 2025년
+    "20250101","20250128","20250129","20250130","20250301",
+    "20250505","20250506","20250506","20250606","20250815",
+    "20251003","20251009","20251007","20251008","20251009","20251225",
+    # 2026년
+    "20260101","20260127","20260128","20260129","20260301",
+    "20260505","20260606","20260815","20260924","20260925","20260926",
+    "20261009","20261225","20261231",
+}
+
+
+def is_trading_day(dt: datetime | None = None) -> bool:
+    """
+    주어진 날짜가 국내 증권시장 거래일인지 판별
+
+    거래일 조건:
+      - 평일 (월~금, weekday 0~4)
+      - KRX 공휴일 아님
+
+    Args:
+        dt: 판별할 datetime (None 이면 현재 KST 기준)
+
+    Returns:
+        True = 거래일, False = 비거래일 (주말/공휴일)
+    """
+    if dt is None:
+        dt = datetime.now(KST)
+
+    # 주말 체크 (5=토, 6=일)
+    if dt.weekday() >= 5:
+        return False
+
+    # 공휴일 체크
+    date_str = dt.strftime("%Y%m%d")
+    if date_str in _KRX_HOLIDAYS:
+        return False
+
+    return True
+
+
+def assert_trading_day(job_name: str = "") -> bool:
+    """
+    비거래일이면 로그를 남기고 False 반환
+    스케줄 작업 최상단에서 호출하는 가드 함수
+    """
+    now = datetime.now(KST)
+    if not is_trading_day(now):
+        weekday_str = ["월","화","수","목","금","토","일"][now.weekday()]
+        reason      = "주말" if now.weekday() >= 5 else "공휴일"
+        logger.debug(
+            f"[Scheduler] {job_name} 스킵 — "
+            f"{now.strftime('%Y-%m-%d')}({weekday_str}) {reason}"
+        )
+        return False
+    return True
+
 # ──────────────────────────────────────────────────────────────
 # 로그 설정
 # ──────────────────────────────────────────────────────────────
@@ -118,7 +182,9 @@ bot = TelegramBot(
 # ──────────────────────────────────────────────────────────────
 
 async def job_token_refresh():
-    """09:00 — API 토큰 갱신"""
+    """09:00 — API 토큰 갱신 (거래일에만)"""
+    if not assert_trading_day("token_refresh"):
+        return
     try:
         broker._get_token(force=True)
         logger.info("[Scheduler] 토큰 갱신 완료")
@@ -128,7 +194,9 @@ async def job_token_refresh():
 
 
 async def job_pre_scan():
-    """14:30 — 종가베팅 후보 종목 사전 스캔"""
+    """14:30 — 종가베팅 후보 종목 사전 스캔 (거래일에만)"""
+    if not assert_trading_day("pre_scan"):
+        return
     logger.info("[Scheduler] 14:30 종가베팅 사전 스캔 시작")
     try:
         candidates = strategy.scan_candidates()
@@ -143,7 +211,9 @@ async def job_pre_scan():
 
 
 async def job_auto_buy():
-    """15:10 — 종가베팅 눌림 확인 후 자동 매수"""
+    """15:10 — 종가베팅 눌림 확인 후 자동 매수 (거래일에만)"""
+    if not assert_trading_day("auto_buy"):
+        return
     logger.info("[Scheduler] 15:10 종가베팅 자동 매수 시작")
     try:
         balance    = broker.get_balance()
@@ -225,7 +295,9 @@ async def job_auto_buy():
 
 
 async def job_monitor_exit():
-    """매분 — 종가베팅 D+1 익절/손절 감시"""
+    """매분 — 종가베팅 D+1 익절/손절 감시 (거래일에만)"""
+    if not assert_trading_day("monitor_exit"):
+        return
     now = datetime.now(KST).strftime("%H:%M")
     in_nxt     = "08:00" <= now <= "08:50"
     in_morning = "09:00" <= now <= "10:00"
@@ -281,7 +353,9 @@ async def job_cleanup_logs():
 # ──────────────────────────────────────────────────────────────
 
 async def job_scalp_pre_market():
-    """08:50 — 단타 장전 준비"""
+    """08:50 — 단타 장전 준비 (거래일에만 실행)"""
+    if not assert_trading_day("scalp_pre_market"):
+        return
     logger.info("[Scalp] 08:50 단타 장전 준비 시작")
     try:
         balance = broker.get_balance()
@@ -312,10 +386,14 @@ async def job_scalp_pre_market():
 
 async def job_scalp_loop():
     """
-    30초 주기 — 단타 핵심 루프
-    1. 보유 포지션 청산 감시 (09:00~15:25, 항상)
-    2. 신규 진입 스캔 (09:00~13:00, scalp_paused=False 일 때)
+    30초 주기 — 단타 핵심 루프 (거래일 09:00~15:25만 실행)
+    1. 보유 포지션 청산 감시
+    2. 신규 진입 스캔
     """
+    # 주말/공휴일 스킵
+    if not assert_trading_day("scalp_loop"):
+        return
+
     now_str = datetime.now(KST).strftime("%H:%M")
 
     # 장 시간 외 스킵
@@ -528,7 +606,9 @@ async def job_scalp_loop():
 
 
 async def job_scalp_force_exit_warn():
-    """15:10 — 단타 강제 청산 10분 전 경고"""
+    """15:10 — 단타 강제 청산 10분 전 경고 (거래일에만)"""
+    if not assert_trading_day("scalp_force_exit_warn"):
+        return
     positions = scalp_strategy.get_positions()
     if not positions:
         return
@@ -548,7 +628,9 @@ async def job_scalp_force_exit_warn():
 
 
 async def job_scalp_force_exit():
-    """15:20 — 단타 전량 강제 청산"""
+    """15:20 — 단타 전량 강제 청산 (거래일에만)"""
+    if not assert_trading_day("scalp_force_exit"):
+        return
     logger.info("[Scalp] 15:20 강제 청산 실행")
     exited = await asyncio.to_thread(scalp_strategy.force_exit_all)
     if exited:
@@ -560,7 +642,9 @@ async def job_scalp_force_exit():
 
 
 async def job_scalp_daily_report():
-    """15:35 — 단타 당일 결산 (종가베팅 15:30 잠금 초기화 이후)"""
+    """15:35 — 단타 당일 결산 (거래일에만)"""
+    if not assert_trading_day("scalp_daily_report"):
+        return
     report = scalp_strategy.daily_summary()
     await bot.send(report)
     logger.info("[Scalp] 당일 결산 완료")
