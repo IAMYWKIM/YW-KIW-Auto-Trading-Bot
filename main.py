@@ -1,6 +1,6 @@
 """
-main.py — 키움 국내주식 자동매매 통합 메인 스케줄러
-종가베팅 + 단타 전략 단일 프로세스 운영
+main.py — 키움 국내주식 자동매매 통합 메인 스케줄러  v3.0.0
+종가베팅 + 단타 + 상한가선진입 3전략 단일 프로세스 운영
 
 [종가베팅 스케줄 (KST 평일)]
   09:00        — API 토큰 갱신
@@ -20,9 +20,18 @@ main.py — 키움 국내주식 자동매매 통합 메인 스케줄러
   15:20        — 전량 강제 청산
   15:30        — 단타 당일 결산 리포트
 
-[v2.0 변경]
-  scalp_main.py 폐기 → main.py 에 단타 전략 통합
-  동일 봇 토큰, 단일 프로세스로 두 전략 운영
+[상한가선진입 스케줄 (KST 평일) — v3.0 NEW]
+  08:50        — 전략C 장전 초기화 (거래량 캐시 + 포지션 복원)
+  08:00~09:30  — 익일 아침 갭 매도 감시 (매분)
+  09:00~14:30  — 장중 스캔·진입·청산 루프 (30초)
+  09:25        — 강제청산 5분 전 경고
+  09:30        — 익일 미청산 전량 강제청산
+  15:40        — 전략C 당일 결산 리포트
+
+[v3.0 변경]
+  전략C 상한가선진입 추가 — 25%+ 구간 7대 신호 복합분석
+  PositionRegistry — 3전략 충돌·자금 경합 방지
+  TelegramBot — limit_strategy / limit_cfg / limit_scanner / registry 주입
 """
 
 import asyncio
@@ -49,6 +58,15 @@ from scanner import DayTradingScanner
 from strategy_scalping import ScalpStrategy
 from market_filter import MarketFilter
 from fib_reentry import FibReentryManager
+
+# ── 전략C 상한가선진입 모듈 (v3.0 NEW) ─────────────────────
+from position_registry import PositionRegistry, Strategy as Strat
+from limit_config      import LimitConfig
+from limit_scanner     import LimitScanner
+from strategy_limit    import LimitStrategy
+
+# ── 성과 추적 모듈 (v3.1 NEW) ──────────────────────────────
+from performance_tracker import PerformanceTracker
 
 
 # ──────────────────────────────────────────────────────────────
@@ -168,12 +186,26 @@ market_filter   = MarketFilter(broker)
 fib_mgr         = FibReentryManager()
 scalp_strategy.fib_mgr = fib_mgr   # Fib 재진입 매니저 주입
 
-# 텔레그램 봇 (두 전략 컴포넌트 모두 주입)
+# ── 전략C 컴포넌트 (v3.0 NEW) ───────────────────────────────
+registry       = PositionRegistry()
+limit_cfg      = LimitConfig()
+limit_strategy = LimitStrategy(broker, limit_cfg)
+limit_scanner  = LimitScanner(broker, limit_cfg, limit_strategy)
+
+# ── 성과 추적기 (v3.1 NEW) ───────────────────────────────────
+tracker = PerformanceTracker()
+
+# 텔레그램 봇 (3전략 컴포넌트 모두 주입)
 bot = TelegramBot(
     broker, cfg, scfg, strategy,
-    scanner        = scalp_scanner,
-    scalp_strategy = scalp_strategy,
-    scalp_cfg      = scalp_cfg,
+    scanner         = scalp_scanner,
+    scalp_strategy  = scalp_strategy,
+    scalp_cfg       = scalp_cfg,
+    limit_strategy  = limit_strategy,
+    limit_cfg       = limit_cfg,
+    limit_scanner   = limit_scanner,
+    registry        = registry,
+    tracker         = tracker,
 )
 
 
@@ -247,6 +279,15 @@ async def job_auto_buy():
             cur_price  = c.get("cur_price", 0)
             prev_close = c.get("prev_close", 0)
 
+            # ── [v3.0] 레지스트리 충돌 방지 ──────────────────
+            _ok, _reason = registry.can_buy(
+                code, Strat.CLOSE_BET, cur_price * 10, available
+            )
+            if not _ok:
+                logger.info(f"[CloseBet] {name}({code}) 레지스트리 거부: {_reason}")
+                continue
+            # ──────────────────────────────────────────────────
+
             if prev_close <= 0:
                 for attempt in range(3):
                     try:
@@ -276,6 +317,7 @@ async def job_auto_buy():
             if result["success"]:
                 cfg.add_ledger_record(code, "BUY", cur_price, qty)
                 cfg.set_lock(code)
+                registry.register(code, Strat.CLOSE_BET, qty, cur_price)  # v3.0
                 await bot.notify_buy(
                     code, name, qty, cur_price,
                     f"눌림 {entry['pullback_pct']:+.1f}% / 점수:{c['score']}"
@@ -323,6 +365,16 @@ async def job_monitor_exit():
             result   = broker.sell_order(code, sell_qty, 0, "3")
             if result["success"]:
                 cfg.add_ledger_record(code, "SELL", cur_price, sell_qty)
+                pnl = (cur_price - buy_price) * sell_qty
+                tracker.record_sell(          # v3.1
+                    strategy="A", code=code, name=name,
+                    buy_price=buy_price, sell_price=cur_price,
+                    qty=sell_qty, reason=exit_sig["reason"],
+                    hold_hours=(datetime.now(KST) - datetime.fromisoformat(
+                        pos.get("buy_time", datetime.now(KST).isoformat())
+                    ).replace(tzinfo=KST)).total_seconds() / 3600
+                    if pos.get("buy_time") else 0,
+                )
                 await bot.notify_sell(code, name, sell_qty, cur_price,
                                       buy_price, exit_sig["reason"])
     except Exception as e:
@@ -332,7 +384,8 @@ async def job_monitor_exit():
 async def job_reset_locks():
     """15:30 — 종가베팅 전체 잠금 초기화"""
     cfg.release_all_locks()
-    logger.info("[Scheduler] 종가베팅 잠금 초기화 완료")
+    registry.reset_daily()   # v3.0: 일일 손익 리셋
+    logger.info("[Scheduler] 종가베팅 잠금 초기화 + 레지스트리 일일 리셋 완료")
 
 
 async def job_cleanup_logs():
@@ -722,6 +775,301 @@ async def job_scalp_daily_report():
 
 
 # ──────────────────────────────────────────────────────────────
+# ③ 전략C — 상한가선진입 스케줄 작업  v3.0 NEW
+# ──────────────────────────────────────────────────────────────
+
+async def job_limit_pre_market():
+    """08:50 — 전략C 장전 초기화 (거래일에만)"""
+    if not assert_trading_day("limit_pre_market"):
+        return
+    logger.info("[Limit] 08:50 장전 초기화 시작")
+    try:
+        balance = broker.get_balance()
+        cash    = balance["cash"]
+        limit_strategy.init_daily(cash)
+        await asyncio.to_thread(limit_scanner.init_daily)
+        registry.reset_daily()
+        # 복원된 포지션을 레지스트리에 재등록
+        for pos in limit_strategy.get_positions():
+            registry.register(pos.code, Strat.PRE_LIMIT, pos.qty, pos.buy_price)
+        logger.info(f"[Limit] 초기화 완료 — 기준 현금 {cash:,}원")
+        await bot.send(
+            f"<b>[ 전략C 장전 준비 완료 ]</b> "
+            f"{datetime.now(KST).strftime('%H:%M')}\n\n"
+            f"현금: <b>{cash:,}원</b>\n"
+            f"스캔 중단: {limit_cfg.get_scan()['scan_stop_time']}\n"
+            f"강제청산: {limit_cfg.get_exit()['force_sell_time']}"
+        )
+    except Exception as e:
+        logger.error(f"[Limit] 장전 초기화 실패: {e}")
+        await bot.notify_error(f"전략C 초기화 실패: {e}")
+
+
+async def job_limit_morning_exit():
+    """08:00~09:30 매분 — 전략C 익일 아침 갭 매도 감시"""
+    if not assert_trading_day("limit_morning_exit"):
+        return
+    now_str = datetime.now(KST).strftime("%H:%M")
+    if not ("08:00" <= now_str <= "09:30"):
+        return
+    for pos in limit_strategy.get_positions():
+        try:
+            info      = await asyncio.to_thread(broker.get_stock_info, pos.code)
+            if not info:
+                continue
+            cur_price = info["cur_price"]
+            exit_sig  = limit_strategy.check_exit_next_day(pos, cur_price)
+            if exit_sig["signal"] == "HOLD":
+                continue
+            result = await asyncio.to_thread(
+                broker.sell_order, pos.code, exit_sig["qty"], 0, "3"
+            )
+            if result["success"]:
+                pnl   = pos.profit_won(cur_price)
+                limit_strategy.remove_position(
+                    pos.code, cur_price, exit_sig["qty"], exit_sig["reason"]
+                )
+                registry.close(pos.code, reason=exit_sig["reason"], pnl=pnl)
+                await bot.notify_limit_sell(
+                    pos.code, pos.name, exit_sig["qty"],
+                    cur_price, pos.buy_price, exit_sig["reason"]
+                )
+        except Exception as e:
+            logger.error(f"[Limit] 아침 매도 오류 {pos.code}: {e}")
+
+
+async def job_limit_scan_loop():
+    """30초 주기 — 전략C 장중 스캔·진입·청산 루프 (09:00~14:30)"""
+    if not assert_trading_day("limit_scan_loop"):
+        return
+    now_str  = datetime.now(KST).strftime("%H:%M")
+    scan_cfg = limit_cfg.get_scan()
+
+    # ── 보유 포지션 장중 청산 감시 ──────────────────────────
+    for pos in limit_strategy.get_positions():
+        try:
+            info = await asyncio.to_thread(broker.get_stock_info, pos.code)
+            if not info:
+                continue
+            cur_price = info["cur_price"]
+            exit_sig  = limit_strategy.check_exit(pos, cur_price)
+            if exit_sig["signal"] == "HOLD":
+                continue
+            result = await asyncio.to_thread(
+                broker.sell_order, pos.code, exit_sig["qty"], 0, "3"
+            )
+            if result["success"]:
+                pnl = pos.profit_won(cur_price)
+                limit_strategy.remove_position(
+                    pos.code, cur_price, exit_sig["qty"], exit_sig["reason"]
+                )
+                registry.close(pos.code, reason=exit_sig["reason"], pnl=pnl)
+                await bot.notify_limit_sell(
+                    pos.code, pos.name, exit_sig["qty"],
+                    cur_price, pos.buy_price, exit_sig["reason"]
+                )
+        except Exception as e:
+            logger.error(f"[Limit] 장중 청산 오류 {pos.code}: {e}")
+
+    # ── 신규 진입 스캔 ────────────────────────────────────
+    if now_str >= scan_cfg["scan_stop_time"]:
+        return
+    if limit_strategy.is_paused:
+        return
+    if len(limit_strategy.held_codes()) >= limit_cfg.get_entry()["max_positions"]:
+        return
+    if not ("09:00" <= now_str <= "14:30"):
+        return
+
+    try:
+        candidates = await asyncio.to_thread(
+            limit_scanner.scan, limit_strategy.held_codes(), set()
+        )
+        if not candidates:
+            return
+        balance = await asyncio.to_thread(broker.get_balance)
+        cash    = balance["cash"]
+        if cash <= 0:
+            return
+
+        for candidate in candidates[:3]:
+            code  = candidate["code"]
+            score = candidate.get("score", 0)
+
+            ok, reason = registry.can_buy(
+                code, Strat.PRE_LIMIT, candidate["cur_price"] * 10, cash
+            )
+            if not ok:
+                logger.info(f"[Limit] 레지스트리 거부 {code}: {reason}")
+                continue
+
+            entry_sig = limit_strategy.check_buy(candidate, cash)
+            if not entry_sig["signal"]:
+                logger.info(
+                    f"[Limit] 진입 거부 {candidate['name']}({code}): "
+                    f"{entry_sig['reason']}"
+                )
+                continue
+
+            qty   = entry_sig["qty"]
+            price = candidate["cur_price"]
+
+            ok, reason = registry.can_buy(code, Strat.PRE_LIMIT, price * qty, cash)
+            if not ok:
+                continue
+
+            result = await asyncio.to_thread(
+                broker.buy_order, code, qty, price, "0"
+            )
+            if result["success"]:
+                limit_strategy.add_position(
+                    code, candidate["name"], qty, price,
+                    score=score, theme=candidate.get("theme", "")
+                )
+                registry.register(code, Strat.PRE_LIMIT, qty, price)
+                await bot.notify_limit_buy(code, candidate["name"], qty, price, candidate)
+                cash -= price * qty
+                logger.info(
+                    f"[Limit] 매수: {candidate['name']}({code}) "
+                    f"{qty}주 @{price:,}원 | 점수 {score:.1f}"
+                )
+                break
+    except Exception as e:
+        logger.error(f"[Limit] 스캔 루프 오류: {e}")
+        await bot.notify_error(f"전략C 오류: {e}")
+
+
+async def job_limit_force_exit_warn():
+    """09:25 — 전략C 강제청산 5분 전 경고"""
+    if not assert_trading_day("limit_force_exit_warn"):
+        return
+    positions = limit_strategy.get_positions()
+    if not positions:
+        return
+    lines = ["⚠️ <b>[전략C] 09:30 강제청산 5분 전!</b>"]
+    for pos in positions:
+        try:
+            info      = broker.get_stock_info(pos.code)
+            cur_price = info["cur_price"] if info else pos.buy_price
+            pct       = pos.profit_pct(cur_price)
+            icon      = "📈" if pct >= 0 else "📉"
+            lines.append(f"{icon} {pos.name}: {pct:+.1f}% ({pos.qty}주)")
+        except Exception:
+            lines.append(f"• {pos.code}: 조회 실패")
+    await bot.send("\n".join(lines))
+
+
+async def job_limit_force_exit():
+    """09:30 — 전략C 익일 미청산 전량 강제청산"""
+    if not assert_trading_day("limit_force_exit"):
+        return
+    positions = limit_strategy.get_positions()
+    if not positions:
+        return
+    logger.info("[Limit] 09:30 강제청산 실행")
+    exited = []
+    for pos in positions:
+        try:
+            result = await asyncio.to_thread(
+                broker.sell_order, pos.code, pos.qty, 0, "3"
+            )
+            if result["success"]:
+                info = broker.get_stock_info(pos.code)
+                cur  = info["cur_price"] if info else pos.buy_price
+                pnl  = pos.profit_won(cur)
+                limit_strategy.remove_position(pos.code, cur, pos.qty, "강제청산 09:30")
+                registry.close(pos.code, reason="강제청산", pnl=pnl)
+                exited.append(pos.name)
+        except Exception as e:
+            logger.error(f"[Limit] 강제청산 실패 {pos.code}: {e}")
+    if exited:
+        await bot.send(f"⛔ <b>[전략C 강제청산]</b>\n청산: {', '.join(exited)}")
+
+
+async def job_limit_daily_report():
+    """15:40 — 전략C 당일 결산"""
+    if not assert_trading_day("limit_daily_report"):
+        return
+    report = limit_strategy.daily_summary()
+    await bot.send(report)
+    logger.info("[Limit] 당일 결산 완료")
+
+
+# ──────────────────────────────────────────────────────────────
+# ④ 성과 리포트 스케줄 작업  v3.1 NEW
+# ──────────────────────────────────────────────────────────────
+
+async def job_daily_performance():
+    """15:50 — 3전략 통합 일별 성과 리포트 (거래일에만)"""
+    if not assert_trading_day("daily_performance"):
+        return
+    try:
+        now    = datetime.now(KST)
+        report = tracker.daily_report(now)
+        await bot.send(report)
+
+        # 개선 힌트 (거래가 3건 이상일 때만)
+        if tracker.total_count() >= 3:
+            hints = tracker._quick_hints(
+                now.replace(hour=0, minute=0, second=0, microsecond=0).replace(tzinfo=KST),
+                now.replace(hour=23, minute=59, second=59, microsecond=0).replace(tzinfo=KST),
+            )
+            if hints:
+                await bot.send(
+                    "💡 <b>[ 오늘의 개선 힌트 ]</b>\n" + "\n".join(hints)
+                )
+        logger.info("[Performance] 일별 리포트 전송 완료")
+    except Exception as e:
+        logger.error(f"[Performance] 일별 리포트 오류: {e}")
+
+
+async def job_weekly_performance():
+    """금요일 16:00 — 주별 성과 리포트 + 개선 분석"""
+    if not assert_trading_day("weekly_performance"):
+        return
+    now = datetime.now(KST)
+    if now.weekday() != 4:   # 금요일(4)만 실행
+        return
+    try:
+        report = tracker.weekly_report(now)
+        await bot.send(report)
+
+        # 주별 심층 분석 (거래 5건 이상)
+        if tracker.total_count() >= 5:
+            analysis = tracker.improvement_hints(days=7)
+            await bot.send(
+                "🔬 <b>[ 주간 알고리즘 분석 ]</b>\n\n" + analysis
+            )
+        logger.info("[Performance] 주별 리포트 전송 완료")
+    except Exception as e:
+        logger.error(f"[Performance] 주별 리포트 오류: {e}")
+
+
+async def job_monthly_performance():
+    """매월 마지막 거래일 16:10 — 월별 성과 리포트 + 심층 분석"""
+    if not assert_trading_day("monthly_performance"):
+        return
+    now      = datetime.now(KST)
+    tomorrow = now + timedelta(days=1)
+    # 다음날이 거래일이 아닌 경우(주말/공휴일) = 이번달 마지막 거래일
+    next_trading = is_trading_day(tomorrow) or is_trading_day(tomorrow + timedelta(days=1))
+    if now.month == (now + timedelta(days=1)).month and next_trading:
+        return  # 마지막 거래일 아님
+    try:
+        report = tracker.monthly_report(now)
+        await bot.send(report)
+
+        # 월별 심층 개선 분석
+        analysis = tracker.improvement_hints(days=30)
+        await bot.send(
+            "📊 <b>[ 월간 알고리즘 개선 분석 ]</b>\n\n" + analysis
+        )
+        logger.info("[Performance] 월별 리포트 전송 완료")
+    except Exception as e:
+        logger.error(f"[Performance] 월별 리포트 오류: {e}")
+
+
+# ──────────────────────────────────────────────────────────────
 # 스케줄러 설정
 # ──────────────────────────────────────────────────────────────
 
@@ -760,6 +1108,30 @@ def setup_scheduler(scheduler: AsyncIOScheduler):
         id="scalp_loop"
     )
 
+    # ── 전략C 상한가선진입 스케줄 (v3.0 NEW) ─────────────────
+    scheduler.add_job(job_limit_pre_market,      cron(8, 50),  id="limit_pre_market")
+    scheduler.add_job(job_limit_force_exit_warn, cron(9, 25),  id="limit_exit_warn")
+    scheduler.add_job(job_limit_force_exit,      cron(9, 30),  id="limit_force_exit")
+    scheduler.add_job(job_limit_daily_report,    cron(15, 40), id="limit_daily_report")
+
+    # 아침 매도 감시 — 08:00~09:30 매분
+    scheduler.add_job(
+        job_limit_morning_exit,
+        CronTrigger(minute="*", hour="8,9", day_of_week="mon-fri", timezone=KST),
+        id="limit_morning_exit"
+    )
+    # 전략C 장중 루프 — 30초 주기
+    scheduler.add_job(
+        job_limit_scan_loop,
+        "interval", seconds=30,
+        id="limit_scan_loop"
+    )
+
+    # ── 성과 리포트 스케줄 (v3.1 NEW) ────────────────────────
+    scheduler.add_job(job_daily_performance,   cron(15, 50), id="daily_performance")
+    scheduler.add_job(job_weekly_performance,  cron(16,  0), id="weekly_performance")
+    scheduler.add_job(job_monthly_performance, cron(16, 10), id="monthly_performance")
+
     logger.info("[Scheduler] 모든 스케줄 등록 완료")
     for job in scheduler.get_jobs():
         logger.info(f"  {job.id} 등록")
@@ -771,7 +1143,7 @@ def setup_scheduler(scheduler: AsyncIOScheduler):
 
 async def main():
     logger.info("=" * 55)
-    logger.info("  키움 국내주식 자동매매 봇 v2.0 (종가베팅 + 단타 통합)")
+    logger.info("  키움 국내주식 자동매매 봇 v3.0.0 (종가베팅 + 단타 + 상한가선진입)")
     logger.info(f"  시각: {datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S KST')}")
     logger.info(f"  모드: {broker.mode}")
     logger.info("=" * 55)
@@ -785,8 +1157,9 @@ async def main():
         logger.error("  → .env 파일의 앱키/시크릿키를 확인하세요")
         sys.exit(1)
 
-    # 단타 기존 포지션 복원
+    # 기존 포지션 복원
     scalp_strategy.load_positions()
+    limit_strategy.load_positions()   # v3.0: 전략C 포지션 복원
 
     # 텔레그램 봇 빌드
     application = bot.build()
@@ -798,17 +1171,22 @@ async def main():
 
     # 시작 알림
     await bot.send(
-        f"<b>[ 자동매매 봇 v2.0 시작 ]</b>\n"
+        f"<b>[ 자동매매 봇 v3.0.0 시작 ]</b>\n"
         f"<i>{datetime.now(KST).strftime('%Y-%m-%d %H:%M')}</i>\n\n"
         f"모드: <b>{broker.mode}</b>\n\n"
-        f"<b>[ 종가베팅 ]</b>\n"
+        f"<b>[ 종가베팅 A ]</b>\n"
         f"스캔: 14:30 / 매수: 15:10\n"
         f"감시: 08:00~08:50, 09:00~10:00\n\n"
-        f"<b>[ 단타 ]</b>\n"
+        f"<b>[ 단타 B ]</b>\n"
         f"스캔/매매: 09:00~{scalp_cfg.get_scan()['entry_end_time']} (30초 주기)\n"
         f"익절: +{scalp_cfg.get_exit()['take_profit_pct']}% "
         f"/ 손절: {scalp_cfg.get_exit()['stop_loss_pct']}%\n"
         f"강제 청산: {scalp_cfg.get_exit()['force_exit_time']}\n\n"
+        f"<b>[ 상한가선진입 C ]</b> ★ v3.0 NEW\n"
+        f"스캔: 09:00~{limit_cfg.get_scan()['scan_stop_time']} (30초 주기)\n"
+        f"점수기준: {limit_cfg.get_signal()['composite_score_min']}점↑  "
+        f"최대 {limit_cfg.get_entry()['max_positions']}종목\n"
+        f"강제청산: {limit_cfg.get_exit()['force_sell_time']}\n\n"
         f"/start 로 전체 명령어 확인"
     )
 

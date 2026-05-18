@@ -3,454 +3,1081 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>키움 자동매매봇 텔레그램 명령어 가이드 v2.3.0</title>
+<title>키움 자동매매봇 텔레그램 명령어 가이드 v3.0.0</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+KR:wght@300;400;500;700&display=swap');
 :root{--bg:#0d1117;--bg2:#161b22;--bg3:#21262d;--border:#30363d;--text:#e6edf3;--muted:#7d8590;--green:#3fb950;--blue:#58a6ff;--yellow:#d29922;--red:#f85149;--purple:#a371f7;--teal:#39d353;--orange:#f0883e;--pink:#ff6eb4;--green-bg:rgba(63,185,80,.12);--blue-bg:rgba(88,166,255,.12);--yellow-bg:rgba(210,153,34,.12);--red-bg:rgba(248,81,73,.12);--purple-bg:rgba(163,113,247,.12);--orange-bg:rgba(240,136,62,.12);--pink-bg:rgba(255,110,180,.12);}
 *{margin:0;padding:0;box-sizing:border-box;}
 body{background:var(--bg);color:var(--text);font-family:'Noto Sans KR',sans-serif;font-size:14px;line-height:1.7;display:flex;}
-.sidebar{width:230px;background:var(--bg2);border-right:1px solid var(--border);position:fixed;top:0;left:0;bottom:0;overflow-y:auto;padding:16px 0;z-index:100;}
+.sidebar{width:232px;background:var(--bg2);border-right:1px solid var(--border);position:fixed;top:0;left:0;bottom:0;overflow-y:auto;padding:16px 0;z-index:100;}
 .logo{padding:0 16px 14px;border-bottom:1px solid var(--border);margin-bottom:8px;}
 .logo .ver{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--green);background:var(--green-bg);padding:2px 7px;border-radius:10px;display:inline-block;margin-bottom:4px;}
-.logo .t{font-weight:700;font-size:12px;}
-.search-wrap{padding:8px 12px;}
+.logo .t{font-weight:700;font-size:12px;color:var(--text);}
+.logo .s{font-size:11px;color:var(--muted);margin-top:2px;}
+.search-wrap{padding:8px 12px 4px;}
 .search-wrap input{width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 10px;font-size:12px;font-family:inherit;outline:none;}
 .search-wrap input:focus{border-color:var(--blue);}
-.nav-lbl{font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;padding:8px 16px 4px;}
-.nav-item{display:flex;align-items:center;gap:7px;padding:5px 16px;font-size:12px;color:var(--muted);cursor:pointer;text-decoration:none;transition:background .1s,color .1s;}
+.nav-lbl{font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;padding:10px 16px 3px;}
+.nav-item{display:flex;align-items:center;gap:7px;padding:5px 16px;font-size:12px;color:var(--muted);cursor:pointer;text-decoration:none;transition:background .1s,color .1s;border:none;background:none;width:100%;text-align:left;}
 .nav-item:hover{background:var(--bg3);color:var(--text);}
 .nav-item.active{background:rgba(88,166,255,.15);color:var(--blue);}
+.nav-item .new-dot{font-size:9px;background:var(--pink);color:#fff;padding:1px 5px;border-radius:6px;margin-left:auto;font-weight:700;}
 .dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;}
 .dg{background:var(--green)}.db{background:var(--blue)}.dy{background:var(--yellow)}.dp{background:var(--purple)}.dr{background:var(--red)}.do{background:var(--orange)}.dt{background:var(--teal)}.dk{background:var(--pink)}
-.main{margin-left:230px;flex:1;padding:28px 36px 80px;max-width:880px;}
-.banner{background:linear-gradient(135deg,#1a2035 0%,#0d1117 100%);border:1px solid var(--border);border-radius:12px;padding:22px 26px;margin-bottom:28px;}
+.main{margin-left:232px;flex:1;padding:28px 36px 80px;max-width:880px;}
+.banner{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:22px 26px;margin-bottom:28px;}
 .banner h1{font-size:20px;font-weight:700;margin-bottom:4px;}
 .banner p{font-size:12px;color:var(--muted);}
-.badges{display:flex;gap:7px;margin-top:10px;flex-wrap:wrap;}
+.badges{display:flex;gap:7px;margin-top:12px;flex-wrap:wrap;}
 .mb{font-size:11px;padding:2px 9px;border-radius:10px;border:1px solid var(--border);color:var(--muted);font-family:'JetBrains Mono',monospace;}
 .mb.ok{background:var(--green-bg);color:var(--green);border-color:rgba(63,185,80,.3);}
 .mb.new{background:var(--pink-bg);color:var(--pink);border-color:rgba(255,110,180,.3);}
+.mb.v{background:var(--blue-bg);color:var(--blue);border-color:rgba(88,166,255,.3);}
+.strategy-bar{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:28px;}
+.sb{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px 14px;}
+.sb-label{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;margin-bottom:4px;}
+.sb-name{font-size:13px;font-weight:700;margin-bottom:6px;}
+.sb-prop{font-size:11px;color:var(--muted);display:flex;justify-content:space-between;}
+.sb-prop span:last-child{color:var(--text);}
 .section{margin-bottom:44px;}
+.section[hidden]{display:none;}
 .sec-hdr{display:flex;align-items:center;gap:11px;margin-bottom:18px;padding-bottom:10px;border-bottom:1px solid var(--border);}
-.sec-ico{width:34px;height:34px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:15px;}
-.sec-hdr h2{font-size:17px;font-weight:700;}
+.sec-ico{width:34px;height:34px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;}
+.sec-hdr h2{font-size:16px;font-weight:700;}
 .sec-sub{font-size:11px;color:var(--muted);margin-top:1px;}
+.sec-new{font-size:10px;background:var(--pink-bg);color:var(--pink);border:1px solid rgba(255,110,180,.3);padding:2px 8px;border-radius:10px;margin-left:8px;font-weight:700;}
 .card{background:var(--bg2);border:1px solid var(--border);border-radius:10px;margin-bottom:10px;overflow:hidden;transition:border-color .15s;}
 .card:hover{border-color:#444c56;}
-.card.new-card{border-color:rgba(255,110,180,.3);box-shadow:0 0 0 1px rgba(255,110,180,.1);}
+.card.new-card{border-color:rgba(255,110,180,.4);box-shadow:0 0 0 1px rgba(255,110,180,.08);}
+.card.new-card:hover{border-color:rgba(255,110,180,.7);}
 .card-hdr{display:flex;align-items:flex-start;gap:11px;padding:13px 15px;cursor:pointer;user-select:none;}
+.card-hdr:hover .chevron{color:var(--text);}
 .badge{font-family:'JetBrains Mono',monospace;font-size:11.5px;font-weight:700;padding:3px 9px;border-radius:6px;white-space:nowrap;flex-shrink:0;margin-top:1px;}
-.b-green{background:var(--green-bg);color:var(--green)}.b-blue{background:var(--blue-bg);color:var(--blue)}.b-yellow{background:var(--yellow-bg);color:var(--yellow)}.b-purple{background:var(--purple-bg);color:var(--purple)}.b-red{background:var(--red-bg);color:var(--red)}.b-orange{background:var(--orange-bg);color:var(--orange)}.b-teal{background:rgba(57,211,83,.12);color:var(--teal)}.b-pink{background:var(--pink-bg);color:var(--pink)}
-.ci{flex:1;}.cn{font-weight:500;font-size:13px;}.cd{font-size:12px;color:var(--muted);margin-top:2px;}
-.new-tag{display:inline-block;font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;background:var(--pink-bg);color:var(--pink);border:1px solid rgba(255,110,180,.3);margin-left:6px;vertical-align:middle;}
-.arr{color:var(--muted);font-size:11px;transition:transform .15s;margin-top:3px;}
-.card.open .arr{transform:rotate(90deg);}
-.body{display:none;padding:0 15px 14px;border-top:1px solid var(--border);}
-.card.open .body{display:block;}
-.syn{background:var(--bg);border:1px solid var(--border);border-radius:7px;padding:11px 13px;margin:11px 0;}
-.syn-lbl{font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px;}
-.syn-code{font-family:'JetBrains Mono',monospace;font-size:12.5px;color:var(--blue);line-height:1.8;}
-.syn-code .a{color:var(--yellow);}.syn-code .o{color:var(--muted);}
-.ex-lbl{font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px;margin-top:10px;}
-.ex{display:flex;gap:8px;margin-bottom:5px;font-size:12px;align-items:flex-start;}
-.ec{font-family:'JetBrains Mono',monospace;background:var(--bg3);border:1px solid var(--border);border-radius:5px;padding:3px 8px;color:var(--green);white-space:nowrap;flex-shrink:0;font-size:11px;}
-.ee{color:var(--muted);padding-top:2px;}
-.rp-lbl{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:5px;font-family:'Noto Sans KR',sans-serif;margin-top:10px;}
-.rp{background:var(--bg);border:1px solid var(--border);border-radius:7px;padding:11px;font-size:11px;font-family:'JetBrains Mono',monospace;color:#9fa8b0;line-height:1.7;white-space:pre-wrap;}
-.rh{color:var(--text);font-weight:700;}.rg{color:var(--green);}.rr{color:var(--red);}.ry{color:var(--yellow);}.rb{color:var(--blue);}.rk{color:var(--pink);}.rd{color:#444c56;}
-.note{display:flex;gap:9px;background:var(--blue-bg);border:1px solid rgba(88,166,255,.3);border-radius:7px;padding:9px 11px;margin-top:9px;font-size:12px;line-height:1.6;}
-.note-w{background:var(--yellow-bg);border-color:rgba(210,153,34,.3);}
-.note-d{background:var(--red-bg);border-color:rgba(248,81,73,.3);}
-.note-p{background:var(--pink-bg);border-color:rgba(255,110,180,.3);}
-.ni{font-size:13px;flex-shrink:0;margin-top:1px;}
-.flow-box{background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-top:10px;font-size:11.5px;line-height:1.9;}
-.flow-step{display:flex;gap:10px;align-items:flex-start;margin-bottom:6px;}
-.step-num{width:22px;height:22px;border-radius:50%;background:var(--pink-bg);color:var(--pink);border:1px solid rgba(255,110,180,.3);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;}
-.step-txt{color:var(--text);}
-.ptbl{width:100%;border-collapse:collapse;font-size:11.5px;margin-top:10px;}
-.ptbl th{text-align:left;padding:5px 8px;background:var(--bg3);color:var(--muted);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.04em;border:1px solid var(--border);}
-.ptbl td{padding:6px 8px;border:1px solid var(--border);vertical-align:top;}
-.ptbl tr:nth-child(even) td{background:rgba(255,255,255,.02);}
-.kc{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--yellow);white-space:nowrap;}
-.dc{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--purple);}
-.sc{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--green);}
-.grp-row td{background:var(--bg3)!important;font-weight:600;font-size:11px;}
-.two-col{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px;}
-.hidden{display:none!important;}
+.b-green{background:var(--green-bg);color:var(--green);}
+.b-blue{background:var(--blue-bg);color:var(--blue);}
+.b-yellow{background:var(--yellow-bg);color:var(--yellow);}
+.b-purple{background:var(--purple-bg);color:var(--purple);}
+.b-red{background:var(--red-bg);color:var(--red);}
+.b-orange{background:var(--orange-bg);color:var(--orange);}
+.b-teal{background:rgba(57,211,83,.12);color:var(--teal);}
+.b-pink{background:var(--pink-bg);color:var(--pink);}
+.card-info{flex:1;min-width:0;}
+.card-title{font-weight:700;font-size:13px;margin-bottom:2px;display:flex;align-items:center;gap:6px;}
+.card-desc{font-size:12px;color:var(--muted);}
+.new-tag{font-size:9px;background:var(--pink);color:#fff;padding:1px 6px;border-radius:6px;font-weight:700;letter-spacing:.03em;}
+.chevron{color:var(--muted);font-size:12px;transition:transform .2s;margin-top:4px;flex-shrink:0;}
+.card-body{padding:0 15px 15px;display:none;}
+.card-body.open{display:block;}
+.divider{height:1px;background:var(--border);margin:0 0 14px;}
+.param-grid{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin-bottom:12px;}
+.param-key{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--blue);white-space:nowrap;padding:2px 0;}
+.param-val{font-size:12px;color:var(--muted);padding:2px 0;}
+.code-box{background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:10px 13px;font-family:'JetBrains Mono',monospace;font-size:12px;margin-bottom:12px;overflow-x:auto;white-space:pre;}
+.code-box .cmd{color:var(--green);}
+.code-box .arg{color:var(--blue);}
+.code-box .cmt{color:var(--muted);}
+.output-box{background:rgba(0,0,0,.3);border:1px solid var(--border);border-radius:6px;padding:10px 13px;font-family:'JetBrains Mono',monospace;font-size:11.5px;color:#7ee787;line-height:1.6;margin-bottom:12px;white-space:pre-wrap;}
+.note{background:var(--yellow-bg);border:1px solid rgba(210,153,34,.3);border-radius:6px;padding:9px 12px;font-size:12px;color:var(--yellow);margin-bottom:12px;}
+.tip{background:var(--blue-bg);border:1px solid rgba(88,166,255,.3);border-radius:6px;padding:9px 12px;font-size:12px;color:var(--blue);margin-bottom:12px;}
+.warn{background:var(--red-bg);border:1px solid rgba(248,81,73,.3);border-radius:6px;padding:9px 12px;font-size:12px;color:var(--red);margin-bottom:12px;}
+.success{background:var(--green-bg);border:1px solid rgba(63,185,80,.3);border-radius:6px;padding:9px 12px;font-size:12px;color:var(--green);margin-bottom:12px;}
+.score-table{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:12px;}
+.score-table th{text-align:left;font-size:11px;font-weight:700;color:var(--muted);padding:5px 8px;border-bottom:1px solid var(--border);}
+.score-table td{padding:5px 8px;border-bottom:1px solid rgba(48,54,61,.5);}
+.score-table tr:last-child td{border-bottom:none;}
+.no-results{text-align:center;padding:40px;color:var(--muted);display:none;}
+@media print{.sidebar{display:none}.main{margin-left:0}}
 </style>
 </head>
 <body>
+
 <nav class="sidebar">
   <div class="logo">
-    <div class="ver">v2.3.0</div>
-    <div class="t">키움 자동매매봇<br>명령어 가이드</div>
+    <div class="ver">v3.1.0</div>
+    <div class="t">키움 자동매매봇</div>
+    <div class="s">텔레그램 명령어 가이드</div>
   </div>
   <div class="search-wrap">
-    <input type="text" id="srch" placeholder="검색..." oninput="doSearch(this.value)">
+    <input type="text" id="search" placeholder="명령어 검색..." oninput="doSearch(this.value)">
   </div>
-  <div class="nav-lbl">종가베팅</div>
-  <a class="nav-item" href="#s1"><span class="dot db"></span>정보 조회</a>
-  <a class="nav-item" href="#s2"><span class="dot dg"></span>스캔 · 분석</a>
-  <a class="nav-item" href="#s3"><span class="dot dy"></span>수동 주문</a>
-  <a class="nav-item" href="#s4"><span class="dot do"></span>종가베팅 설정</a>
-  <div class="nav-lbl">단타</div>
-  <a class="nav-item" href="#s5"><span class="dot dt"></span>정보 조회</a>
-  <a class="nav-item" href="#s6"><span class="dot dr"></span>제어 명령</a>
-  <a class="nav-item" href="#s7"><span class="dot dp"></span>매매 요약</a>
-  <a class="nav-item" href="#s8"><span class="dot do"></span>단타 설정</a>
-  <div class="nav-lbl">🆕 하이브리드 모드</div>
-  <a class="nav-item" href="#s9"><span class="dot dk"></span>수동 주도주 지정</a>
-  <div class="nav-lbl">파라미터</div>
-  <a class="nav-item" href="#s10"><span class="dot db"></span>종가베팅 전체 키</a>
-  <a class="nav-item" href="#s11"><span class="dot dt"></span>단타 전체 키</a>
+  <div class="nav-lbl">기본</div>
+  <button class="nav-item active" onclick="showSection('sec-common')"><span class="dot db"></span>공통 / 시스템</button>
+  <button class="nav-item" onclick="showSection('sec-close')"><span class="dot dg"></span>전략A — 종가베팅</button>
+  <button class="nav-item" onclick="showSection('sec-scalp')"><span class="dot dy"></span>전략B — 장중단타</button>
+  <div class="nav-lbl">신규 v3.0</div>
+  <button class="nav-item" onclick="showSection('sec-limit')"><span class="dot dk"></span>전략C — 상한가선진입<span class="new-dot">NEW</span></button>
+  <button class="nav-item" onclick="showSection('sec-registry')"><span class="dot dp"></span>포지션 레지스트리<span class="new-dot">NEW</span></button>
+  <div class="nav-lbl">성과 분석</div>
+  <button class="nav-item" onclick="showSection('sec-report-new')"><span class="dot dg"></span>성과 리포트<span class="new-dot">NEW</span></button>
+  <div class="nav-lbl">설정</div>
+  <button class="nav-item" onclick="showSection('sec-cfg-a')"><span class="dot do"></span>전략A 설정 (/config)</button>
+  <button class="nav-item" onclick="showSection('sec-cfg-b')"><span class="dot dy"></span>전략B 설정 (/scalp_config)</button>
+  <button class="nav-item" onclick="showSection('sec-cfg-c')"><span class="dot dk"></span>전략C 설정 (/limit_config)<span class="new-dot">NEW</span></button>
+  <div class="nav-lbl">매매</div>
+  <button class="nav-item" onclick="showSection('sec-trade')"><span class="dot dr"></span>수동 매매</button>
+  <div class="nav-lbl">분석</div>
+  <button class="nav-item" onclick="showSection('sec-report')"><span class="dot dt"></span>분석 / 리포트</button>
+  <div class="nav-lbl">스케줄</div>
+  <button class="nav-item" onclick="showSection('sec-schedule')"><span class="dot dg"></span>자동 스케줄표</button>
 </nav>
 
 <main class="main">
-<div class="banner">
-  <h1>📱 텔레그램 명령어 가이드</h1>
-  <p>키움 국내주식 자동매매봇 — 종가베팅 + 단타(스캘핑) + 하이브리드 통합</p>
-  <div class="badges">
-    <span class="mb ok">v2.3.0</span>
-    <span class="mb">종가베팅 17개</span>
-    <span class="mb">단타 15개</span>
-    <span class="mb new">🆕 하이브리드 3개</span>
-    <span class="mb">2026-05-17</span>
-  </div>
-</div>
 
-<!-- ===== 종가베팅 정보 조회 ===== -->
-<div class="section" id="s1">
-  <div class="sec-hdr">
-    <div class="sec-ico" style="background:var(--blue-bg)">📊</div>
-    <div><h2 style="color:var(--blue)">종가베팅 — 정보 조회</h2><div class="sec-sub">계좌 잔고, 포지션, 이력 조회</div></div>
-  </div>
-  <div class="card" id="c-start"><div class="card-hdr" onclick="tog(this)"><span class="badge b-blue">/start</span><div class="ci"><div class="cn">봇 시작 및 스케줄 안내</div><div class="cd">운영 스케줄과 주요 명령어 출력</div></div><span class="arr">▶</span></div><div class="body"><div class="syn"><div class="syn-lbl">구문</div><div class="syn-code">/start</div></div></div></div>
-  <div class="card" id="c-status"><div class="card-hdr" onclick="tog(this)"><span class="badge b-blue">/status</span><div class="ci"><div class="cn">종가베팅 보유 포지션 + 손익</div><div class="cd">현재 보유 종목 평가손익, 평균단가, 인라인 매도 버튼</div></div><span class="arr">▶</span></div><div class="body"><div class="syn"><div class="syn-lbl">구문</div><div class="syn-code">/status</div></div><div class="rp-lbl">응답 예시</div><div class="rp"><span class="rh">[ 포지션 현황 ]  14:30</span>
-<span class="rg">🔺 삼성전자(005930) 🔓</span>
-   현재 <span class="rh">75,500원</span> / 평단 74,000원
-   손익: <span class="rg">+15,000원 (+2.03%)</span></div></div></div>
-  <div class="card" id="c-balance"><div class="card-hdr" onclick="tog(this)"><span class="badge b-blue">/balance</span><div class="ci"><div class="cn">계좌 잔고 조회</div><div class="cd">예수금 + 총평가금액 + 총손익</div></div><span class="arr">▶</span></div><div class="body"><div class="syn"><div class="syn-lbl">구문</div><div class="syn-code">/balance</div></div></div></div>
-  <div class="card" id="c-history"><div class="card-hdr" onclick="tog(this)"><span class="badge b-blue">/history</span><div class="ci"><div class="cn">매매 이력 조회</div><div class="cd">종가베팅 장부 기반 최근 10건</div></div><span class="arr">▶</span></div><div class="body"><div class="syn"><div class="syn-lbl">구문</div><div class="syn-code">/history <span class="o">[종목코드]</span></div></div><div class="ex-lbl">예제</div><div class="ex"><span class="ec">/history</span><span class="ee">전체 이력</span></div><div class="ex"><span class="ec">/history 005930</span><span class="ee">삼성전자만</span></div></div></div>
-  <div class="card" id="c-version"><div class="card-hdr" onclick="tog(this)"><span class="badge b-blue">/version</span><div class="ci"><div class="cn">버전 정보 및 변경 이력</div><div class="cd">현재 버전 + 최근 변경 이력</div></div><span class="arr">▶</span></div><div class="body"><div class="syn"><div class="syn-lbl">구문</div><div class="syn-code">/version <span class="o">[history]</span></div></div><div class="ex-lbl">예제</div><div class="ex"><span class="ec">/version</span><span class="ee">현재 버전 + 최근 5개</span></div><div class="ex"><span class="ec">/version history</span><span class="ee">전체 이력</span></div></div></div>
-</div>
-
-<!-- ===== 종가베팅 스캔 ===== -->
-<div class="section" id="s2">
-  <div class="sec-hdr"><div class="sec-ico" style="background:var(--green-bg)">🔍</div><div><h2 style="color:var(--green)">종가베팅 — 스캔·분석</h2><div class="sec-sub">후보 종목 스캔, 승률 분석, 결과 업데이트</div></div></div>
-  <div class="card" id="c-scan"><div class="card-hdr" onclick="tog(this)"><span class="badge b-green">/scan</span><div class="ci"><div class="cn">종가베팅 후보 종목 수동 스캔</div><div class="cd">조건 A~G 필터, 결과 자동 로그 저장 (10~30초), 14:30 자동 실행</div></div><span class="arr">▶</span></div><div class="body"><div class="syn"><div class="syn-lbl">구문</div><div class="syn-code">/scan</div></div><div class="rp-lbl">응답 예시</div><div class="rp"><span class="rh">[ 종가베팅 스캔 2개 ]  14:32</span>
-<span class="ry">⭐ 에코프로비엠(247540)  점수:85</span>
-   🔥급등:+12.3%(D-1)  📉눌림:-3.2%
-   💰거래대금:342억  RSI:65</div></div></div>
-  <div class="card" id="c-report"><div class="card-hdr" onclick="tog(this)"><span class="badge b-green">/report</span><div class="ci"><div class="cn">스캔 결과 승률 분석 리포트</div><div class="cd">과거 후보 종목들의 실제 결과 분석</div></div><span class="arr">▶</span></div><div class="body"><div class="syn"><div class="syn-lbl">구문</div><div class="syn-code">/report <span class="o">[일수]</span></div></div><div class="ex-lbl">예제</div><div class="ex"><span class="ec">/report</span><span class="ee">최근 7일</span></div><div class="ex"><span class="ec">/report 30</span><span class="ee">최근 30일</span></div></div></div>
-  <div class="card" id="c-update"><div class="card-hdr" onclick="tog(this)"><span class="badge b-green">/update_results</span><div class="ci"><div class="cn">전날 스캔 결과 업데이트</div><div class="cd">어제 후보들의 실제 등락 기록</div></div><span class="arr">▶</span></div><div class="body"><div class="syn"><div class="syn-lbl">구문</div><div class="syn-code">/update_results <span class="o">[날짜]</span></div></div><div class="ex-lbl">예제</div><div class="ex"><span class="ec">/update_results</span><span class="ee">어제</span></div><div class="ex"><span class="ec">/update_results 20260514</span><span class="ee">특정 날짜</span></div></div></div>
-</div>
-
-<!-- ===== 수동 주문 ===== -->
-<div class="section" id="s3">
-  <div class="sec-hdr"><div class="sec-ico" style="background:var(--yellow-bg)">💰</div><div><h2 style="color:var(--yellow)">종가베팅 — 수동 주문</h2><div class="sec-sub">수동 매수/매도, 당일 잠금 관리</div></div></div>
-  <div class="card" id="c-buy"><div class="card-hdr" onclick="tog(this)"><span class="badge b-yellow">/buy</span><div class="ci"><div class="cn">수동 매수 주문</div><div class="cd">확인 버튼 있음. 가격 0 = 시장가</div></div><span class="arr">▶</span></div><div class="body"><div class="syn"><div class="syn-lbl">구문</div><div class="syn-code">/buy <span class="a">종목코드</span> <span class="a">수량</span> <span class="a">가격</span></div></div><div class="ex-lbl">예제</div><div class="ex"><span class="ec">/buy 005930 10 75000</span><span class="ee">지정가</span></div><div class="ex"><span class="ec">/buy 005930 10 0</span><span class="ee">시장가</span></div></div></div>
-  <div class="card" id="c-sell"><div class="card-hdr" onclick="tog(this)"><span class="badge b-yellow">/sell</span><div class="ci"><div class="cn">수동 매도 주문</div><div class="cd">확인 버튼 있음. 가격 0 = 시장가</div></div><span class="arr">▶</span></div><div class="body"><div class="syn"><div class="syn-lbl">구문</div><div class="syn-code">/sell <span class="a">종목코드</span> <span class="a">수량</span> <span class="a">가격</span></div></div><div class="ex-lbl">예제</div><div class="ex"><span class="ec">/sell 005930 10 76000</span><span class="ee">지정가</span></div><div class="ex"><span class="ec">/sell 005930 10 0</span><span class="ee">시장가</span></div></div></div>
-  <div class="card" id="c-lock"><div class="card-hdr" onclick="tog(this)"><span class="badge b-yellow">/lock &nbsp;/unlock</span><div class="ci"><div class="cn">당일 자동 매수 잠금/해제</div><div class="cd">15:30에 전체 자동 초기화</div></div><span class="arr">▶</span></div><div class="body"><div class="syn"><div class="syn-lbl">구문</div><div class="syn-code">/lock <span class="a">종목코드</span> / /unlock <span class="a">종목코드</span></div></div><div class="ex-lbl">예제</div><div class="ex"><span class="ec">/lock 005930</span><span class="ee">오늘 자동 매수 차단</span></div><div class="ex"><span class="ec">/unlock 005930</span><span class="ee">잠금 해제</span></div></div></div>
-</div>
-
-<!-- ===== 종가베팅 설정 ===== -->
-<div class="section" id="s4">
-  <div class="sec-hdr"><div class="sec-ico" style="background:var(--orange-bg)">⚙️</div><div><h2 style="color:var(--orange)">종가베팅 — /config 설정</h2><div class="sec-sub">전략 조건을 텔레그램으로 즉시 변경</div></div></div>
-  <div class="card open" id="c-cfg"><div class="card-hdr" onclick="tog(this)"><span class="badge b-orange">/config</span><div class="ci"><div class="cn">종가베팅 설정 조회/변경</div><div class="cd">스캔/진입/리스크/매도 전략 실시간 변경</div></div><span class="arr">▶</span></div><div class="body">
-    <div class="syn"><div class="syn-lbl">구문</div><div class="syn-code">/config show <span class="o">[scan|entry|risk|sell|all]</span>
-/config set <span class="a">키</span> <span class="a">값</span>  /config reset  /config help</div></div>
-    <div class="two-col">
-      <div><div class="ex-lbl">조회</div><div class="ex"><span class="ec">/config show</span><span class="ee">전체</span></div><div class="ex"><span class="ec">/config show scan</span><span class="ee">스캔만</span></div></div>
-      <div><div class="ex-lbl">자주 쓰는 변경</div><div class="ex"><span class="ec">/config set risk.stop_loss_pct -4.0</span><span class="ee">손절 -4%</span></div><div class="ex"><span class="ec">/config set entry.max_positions 5</span><span class="ee">최대 5종목</span></div><div class="ex"><span class="ec">/config reset</span><span class="ee">기본값 초기화</span></div></div>
-    </div>
-  </div></div>
-</div>
-
-<!-- ===== 단타 정보 조회 ===== -->
-<div class="section" id="s5">
-  <div class="sec-hdr"><div class="sec-ico" style="background:rgba(57,211,83,.12)">⚡</div><div><h2 style="color:var(--teal)">단타 — 정보 조회</h2><div class="sec-sub">포지션, 시장 상황, Fib 감시</div></div></div>
-  <div class="card" id="c-ss"><div class="card-hdr" onclick="tog(this)"><span class="badge b-teal">/scalp_status</span><div class="ci"><div class="cn">단타 포지션 현황</div><div class="cd">평가손익 / 장중 고점 / 보유 시간</div></div><span class="arr">▶</span></div><div class="body"><div class="syn"><div class="syn-lbl">구문</div><div class="syn-code">/scalp_status</div></div><div class="rp-lbl">응답 예시</div><div class="rp"><span class="rh">[ 단타 포지션 ]  10:32</span>
-<span class="rg">📈 BGF에코(126600)</span>  <span class="rk">★ 수동 추가</span>
-   18,500→<span class="rh">18,830원</span> (<span class="rg">+1.78%</span>) | 고점:18,900 | 12분</div></div></div>
-  <div class="card" id="c-ssc"><div class="card-hdr" onclick="tog(this)"><span class="badge b-teal">/scalp_scan</span><div class="ci"><div class="cn">급등 종목 즉시 스캔</div><div class="cd">장외 시간에도 동작 (~15초)</div></div><span class="arr">▶</span></div><div class="body"><div class="syn"><div class="syn-lbl">구문</div><div class="syn-code">/scalp_scan</div></div></div></div>
-  <div class="card" id="c-mkt"><div class="card-hdr" onclick="tog(this)"><span class="badge b-teal">/scalp_market</span><div class="ci"><div class="cn">시장 상황 조회</div><div class="cd">KOSPI/KOSDAQ ETF 등락률 + 외인 강도. STOP이면 진입 차단. 주말 호출 시 안내</div></div><span class="arr">▶</span></div><div class="body"><div class="syn"><div class="syn-lbl">구문</div><div class="syn-code">/scalp_market</div></div><div class="note"><span class="ni">📊</span><span>STOP(0~30) 차단 | CAUTION(31~60) 1개 | NORMAL(61~80) 2개 | BULLISH(81+) 3개</span></div></div></div>
-  <div class="card" id="c-fib"><div class="card-hdr" onclick="tog(this)"><span class="badge b-teal">/scalp_fib</span><div class="ci"><div class="cn">피보나치 재진입 감시 현황</div><div class="cd">손절 후 Fib 조정대 반등 대기 종목 목록</div></div><span class="arr">▶</span></div><div class="body"><div class="syn"><div class="syn-lbl">구문</div><div class="syn-code">/scalp_fib</div></div><div class="note"><span class="ni">💡</span><span>반등 +0.3% 달성 시 자동 재진입. 최소 10분 대기 후 활성화</span></div></div></div>
-  <div class="card" id="c-dbg"><div class="card-hdr" onclick="tog(this)"><span class="badge b-teal">/scalp_debug</span><div class="ci"><div class="cn">봇 상태 진단</div><div class="cd">매수 안 될 때 — 잔고/시간/캐시/설정 한 번에 체크</div></div><span class="arr">▶</span></div><div class="body"><div class="syn"><div class="syn-lbl">구문</div><div class="syn-code">/scalp_debug</div></div><div style="font-size:12px;color:var(--muted);line-height:2;margin-top:8px">① 잔고  ② 스캐너 상태  ③ 전략 상태  ④ 마지막 스캔  ⑤ 설정 요약</div></div></div>
-</div>
-
-<!-- ===== 단타 제어 ===== -->
-<div class="section" id="s6">
-  <div class="sec-hdr"><div class="sec-ico" style="background:var(--red-bg)">🎛️</div><div><h2 style="color:var(--red)">단타 — 제어 명령</h2><div class="sec-sub">매매 일시정지, 강제청산</div></div></div>
-  <div class="card" id="c-stop"><div class="card-hdr" onclick="tog(this)"><span class="badge b-red">/scalp_stop</span><div class="ci"><div class="cn">신규 진입 ON/OFF 토글</div><div class="cd">중단 중에도 보유 포지션 청산 감시 계속</div></div><span class="arr">▶</span></div><div class="body"><div class="syn"><div class="syn-lbl">구문</div><div class="syn-code">/scalp_stop (토글)</div></div></div></div>
-  <div class="card" id="c-exit"><div class="card-hdr" onclick="tog(this)"><span class="badge b-red">/scalp_exit_all</span><div class="ci"><div class="cn">전체 포지션 즉시 시장가 청산</div><div class="cd">⚠️ 긴급 리스크 관리 시 사용</div></div><span class="arr">▶</span></div><div class="body"><div class="syn"><div class="syn-lbl">구문</div><div class="syn-code">/scalp_exit_all</div></div></div></div>
-</div>
-
-<!-- ===== 단타 매매 요약 ===== -->
-<div class="section" id="s7">
-  <div class="sec-hdr"><div class="sec-ico" style="background:var(--purple-bg)">📈</div><div><h2 style="color:var(--purple)">단타 — 매매 요약</h2><div class="sec-sub">일별/주별/월별 손익 + 종목별 상세</div></div></div>
-  <div class="card open" id="c-sum"><div class="card-hdr" onclick="tog(this)"><span class="badge b-purple">/scalp_summary</span><div class="ci"><div class="cn">매매 요약 — 일/주/월/날짜별</div><div class="cd">scalp_daily_log.json 기반. 인수 없으면 버튼 메뉴</div></div><span class="arr">▶</span></div><div class="body">
-    <div class="syn"><div class="syn-lbl">구문</div><div class="syn-code">/scalp_summary
-/scalp_summary <span class="a">daily</span> / <span class="a">weekly</span> / <span class="a">monthly</span>
-/scalp_summary <span class="a">YYYYMMDD</span></div></div>
-    <div class="ex-lbl">예제</div>
-    <div class="ex"><span class="ec">/scalp_summary daily</span><span class="ee">오늘 요약 + 자세히 보기</span></div>
-    <div class="ex"><span class="ec">/scalp_summary weekly</span><span class="ee">이번 주 + 일별 소계</span></div>
-    <div class="ex"><span class="ec">/scalp_summary 20260517</span><span class="ee">5월 17일 종목별 상세</span></div>
-  </div></div>
-</div>
-
-<!-- ===== 단타 설정 ===== -->
-<div class="section" id="s8">
-  <div class="sec-hdr"><div class="sec-ico" style="background:var(--orange-bg)">🔧</div><div><h2 style="color:var(--orange)">단타 — /scalp_config 설정</h2><div class="sec-sub">단타 파라미터 실시간 변경</div></div></div>
-  <div class="card open" id="c-scfg"><div class="card-hdr" onclick="tog(this)"><span class="badge b-orange">/scalp_config</span><div class="ci"><div class="cn">단타 설정 조회/변경</div><div class="cd">스캔/진입/청산/리스크 실시간 변경</div></div><span class="arr">▶</span></div><div class="body">
-    <div class="syn"><div class="syn-lbl">구문</div><div class="syn-code">/scalp_config show <span class="o">[scan|entry|exit|risk|all]</span>
-/scalp_config set <span class="a">키</span> <span class="a">값</span>  /scalp_config reset</div></div>
-    <div class="ex-lbl">자주 쓰는 변경</div>
-    <div class="ex"><span class="ec">/scalp_config set scan.entry_end_time 14:30</span><span class="ee">진입 마감</span></div>
-    <div class="ex"><span class="ec">/scalp_config set exit.stop_loss_pct -2.0</span><span class="ee">손절 완화</span></div>
-    <div class="ex"><span class="ec">/scalp_config set exit.take_profit_pct 3.0</span><span class="ee">익절 상향</span></div>
-    <div class="ex"><span class="ec">/scalp_config set entry.max_positions 2</span><span class="ee">보수적 운영</span></div>
-    <div class="ex"><span class="ec">/scalp_config set entry.use_vwap_filter false</span><span class="ee">VWAP 해제</span></div>
-  </div></div>
-</div>
-
-<!-- ===== 🆕 하이브리드 모드 ===== -->
-<div class="section" id="s9">
-  <div class="sec-hdr">
-    <div class="sec-ico" style="background:var(--pink-bg)">🎯</div>
-    <div>
-      <h2 style="color:var(--pink)">🆕 하이브리드 모드 — 수동 주도주 지정</h2>
-      <div class="sec-sub">유저가 직접 주도주를 지정 → 동일한 단타 로직으로 자동 매매</div>
+  <!-- ─── BANNER ─────────────────────────────────────────────────── -->
+  <div class="banner">
+    <h1>📡 키움 자동매매봇 명령어 가이드</h1>
+    <p>GCP Ubuntu · 키움 REST API · 텔레그램 봇 통합 운영 가이드</p>
+    <div class="badges">
+      <span class="mb v">v3.1.0</span>
+      <span class="mb ok">3전략 통합</span>
+      <span class="mb ok">종가베팅 A</span>
+      <span class="mb ok">장중단타 B</span>
+      <span class="mb ok">상한가선진입 C</span>
+      <span class="mb new">성과 리포트 ★NEW</span>
     </div>
   </div>
 
-  <!-- 개념 설명 -->
-  <div style="background:var(--bg2);border:1px solid rgba(255,110,180,.3);border-radius:10px;padding:16px 18px;margin-bottom:14px;">
-    <div style="font-weight:700;color:var(--pink);margin-bottom:10px;font-size:13px">💡 하이브리드 모드란?</div>
-    <div style="font-size:12px;color:var(--muted);line-height:1.9">
-      자동 스캐너는 <b style="color:var(--text)">상승률/거래대금/거래량</b>으로 종목을 선정합니다.<br>
-      하지만 장 초반 주도주·테마는 <b style="color:var(--text)">사람의 눈</b>으로 더 정확히 판단할 수 있습니다.<br>
-      유저가 직접 주도주를 지정하면, <b style="color:var(--pink)">스캐너 필터를 우회</b>하고 동일한 단타 로직(손절/익절/트레일링)으로 자동 매매합니다.
-    </div>
-    <div style="margin-top:12px">
-      <div class="flow-step"><div class="step-num">1</div><div class="step-txt"><code style="color:var(--pink)">/scalp_add 247540</code> 입력 → 에코프로비엠 감시 시작</div></div>
-      <div class="flow-step"><div class="step-num">2</div><div class="step-txt">30초 루프마다 실시간 시세 조회 → 진입 조건 체크 → 자동 매수</div></div>
-      <div class="flow-step"><div class="step-num">3</div><div class="step-txt">손절/익절/트레일링 동일 청산 로직 적용 (자동 스캔 종목과 동일)</div></div>
-      <div class="flow-step"><div class="step-num">4</div><div class="step-txt"><code style="color:var(--pink)">/scalp_remove 247540</code> 입력 → 신규 진입 중단 (보유분 유지)</div></div>
-    </div>
+  <!-- 전략 요약 바 -->
+  <div class="strategy-bar">
+    <div class="sb"><div class="sb-label" style="color:var(--green)">전략 A</div><div class="sb-name">종가베팅</div><div class="sb-prop"><span>매수</span><span>15:10~15:20</span></div><div class="sb-prop"><span>목표</span><span>+2~5%</span></div><div class="sb-prop"><span>자금</span><span>25%</span></div></div>
+    <div class="sb"><div class="sb-label" style="color:var(--yellow)">전략 B</div><div class="sb-name">장중단타</div><div class="sb-prop"><span>매수</span><span>09:00~13:00</span></div><div class="sb-prop"><span>목표</span><span>+0.5~2%</span></div><div class="sb-prop"><span>자금</span><span>30%</span></div></div>
+    <div class="sb" style="border-color:rgba(255,110,180,.3)"><div class="sb-label" style="color:var(--pink)">전략 C ★NEW</div><div class="sb-name">상한가선진입</div><div class="sb-prop"><span>매수</span><span>09:00~14:30</span></div><div class="sb-prop"><span>목표</span><span>+5~15%</span></div><div class="sb-prop"><span>자금</span><span>30%</span></div></div>
   </div>
+  <div id="no-results" class="no-results">검색 결과가 없습니다.</div>
 
-  <!-- /scalp_add -->
-  <div class="card new-card open" id="c-add">
-    <div class="card-hdr" onclick="tog(this)">
-      <span class="badge b-pink">/scalp_add</span>
-      <div class="ci">
-        <div class="cn">주도주 수동 감시 추가 <span class="new-tag">NEW</span></div>
-        <div class="cd">종목코드로 지정 → 30초 후부터 자동 매수 시도. 스캐너 필터 우회</div>
+  <!-- ═══════════════════════════════════════════════════════════════
+       공통 / 시스템
+  ════════════════════════════════════════════════════════════════ -->
+  <section class="section" id="sec-common">
+    <div class="sec-hdr"><div class="sec-ico" style="background:var(--blue-bg)">💬</div><div><h2>공통 / 시스템</h2><div class="sec-sub">봇 상태, 잔고, 버전, 가이드</div></div></div>
+
+    <!-- /start -->
+    <div class="card" data-cmd="/start">
+      <div class="card-hdr" onclick="toggle(this)">
+        <span class="badge b-blue">/start</span>
+        <div class="card-info"><div class="card-title">봇 시작 및 명령어 안내</div><div class="card-desc">봇을 시작하고 전체 명령어 목록을 출력합니다.</div></div>
+        <span class="chevron">▼</span>
       </div>
-      <span class="arr">▶</span>
-    </div>
-    <div class="body">
-      <div class="syn"><div class="syn-lbl">구문</div>
-        <div class="syn-code">/scalp_add <span class="a">종목코드</span> <span class="o">[종목명]</span></div>
-      </div>
-      <div class="ex-lbl">예제</div>
-      <div class="ex"><span class="ec">/scalp_add 247540</span><span class="ee">에코프로비엠 — 이름 자동 조회</span></div>
-      <div class="ex"><span class="ec">/scalp_add 005930 삼성전자</span><span class="ee">이름 직접 지정</span></div>
-      <div class="ex"><span class="ec">/scalp_add 000660</span><span class="ee">SK하이닉스</span></div>
-      <div class="rp-lbl">응답 예시</div>
-      <div class="rp"><span class="rg">✅ 하이브리드 감시 추가</span>
+      <div class="card-body">
+        <div class="divider"></div>
+        <div class="code-box"><span class="cmd">/start</span></div>
+        <div class="output-box">🤖 키움 자동매매봇 v3.0.0 시작
+모드: MOCK | KST: 2026-05-18 09:00
 
-📌 종목: <span class="rh">에코프로비엠(247540)</span>
-💰 현재가: 35,200원
+[ 전략A 종가베팅 ] 스캔: 14:30 / 매수: 15:10
+[ 전략B 장중단타 ] 09:00~13:00 (30초)
+[ 전략C 선진입 ★] 09:00~14:30 (30초)
 
-이 종목은 다음 30초 루프부터 자동으로 매수 시도합니다.
-진입 조건: 포지션 여유 + 현금 + 진입 마감 시각 이내
-
-<span class="rd">/scalp_remove 247540 — 감시 중단
-/scalp_watchlist — 전체 목록 확인</span></div>
-      <div class="note note-p">
-        <span class="ni">🎯</span>
-        <span><b>스캐너 필터 우회</b>: 상승률·거래대금·거래량 조건 없이 진입<br>
-        <b>진입 조건 유지</b>: 포지션 수 / 현금 / 시간 마감 / 쿨다운은 동일 적용<br>
-        <b>알림 표시</b>: 매수/매도 알림에 <code>source: MANUAL</code>로 자동·수동 구분</span>
+/guide 로 상세 명령어 안내</div>
       </div>
     </div>
-  </div>
 
-  <!-- /scalp_remove -->
-  <div class="card new-card open" id="c-rmv">
-    <div class="card-hdr" onclick="tog(this)">
-      <span class="badge b-pink">/scalp_remove</span>
-      <div class="ci">
-        <div class="cn">수동 감시 중단 <span class="new-tag">NEW</span></div>
-        <div class="cd">신규 진입만 중단. 보유 중이면 포지션은 유지하고 기존 청산 로직 계속</div>
+    <!-- /status -->
+    <div class="card" data-cmd="/status">
+      <div class="card-hdr" onclick="toggle(this)">
+        <span class="badge b-blue">/status</span>
+        <div class="card-info"><div class="card-title">전체 포지션 현황 (3전략 통합)</div><div class="card-desc">전략A·B·C 보유 포지션과 손익을 한눈에 조회합니다.</div></div>
+        <span class="chevron">▼</span>
       </div>
-      <span class="arr">▶</span>
-    </div>
-    <div class="body">
-      <div class="syn"><div class="syn-lbl">구문</div>
-        <div class="syn-code">/scalp_remove <span class="a">종목코드</span></div>
-      </div>
-      <div class="ex-lbl">예제</div>
-      <div class="ex"><span class="ec">/scalp_remove 247540</span><span class="ee">에코프로비엠 감시 중단</span></div>
-      <div class="ex"><span class="ec">/scalp_remove 005930</span><span class="ee">삼성전자 감시 중단</span></div>
-      <div class="rp-lbl">응답 예시 (보유 중일 때)</div>
-      <div class="rp"><span class="ry">⏸ 에코프로비엠(247540) 신규 진입 중단</span>
-현재 보유 포지션은 기존 청산 로직으로 계속 관리됩니다</div>
-      <div class="note note-w">
-        <span class="ni">⚠️</span>
-        <span>감시 중단 후에도 <b>이미 보유한 포지션</b>은 손절/익절/트레일링이 그대로 적용됩니다. 즉시 청산이 필요하면 <code>/scalp_exit_all</code>을 사용하세요.</span>
+      <div class="card-body">
+        <div class="divider"></div>
+        <div class="code-box"><span class="cmd">/status</span></div>
+        <div class="output-box">[ 전략A 종가베팅 ]
+  에코프로비엠 10주 @312,000 → +4.2%
+
+[ 전략B 장중단타 ]
+  없음
+
+[ 전략C 상한가선진입 ]
+  한화에어로 5주 @284,000 → +8.1%
+
+총 평가손익: +482,000원</div>
       </div>
     </div>
-  </div>
 
-  <!-- /scalp_watchlist -->
-  <div class="card new-card open" id="c-wl">
-    <div class="card-hdr" onclick="tog(this)">
-      <span class="badge b-pink">/scalp_watchlist</span>
-      <div class="ci">
-        <div class="cn">수동 감시 목록 조회 <span class="new-tag">NEW</span></div>
-        <div class="cd">활성/중단 목록 + 활성 종목 실시간 현재가 + 등락률</div>
+    <!-- /balance -->
+    <div class="card" data-cmd="/balance">
+      <div class="card-hdr" onclick="toggle(this)">
+        <span class="badge b-blue">/balance</span>
+        <div class="card-info"><div class="card-title">계좌 잔고 조회</div><div class="card-desc">가용 현금, 보유 종목 평가액, 총 자산을 조회합니다.</div></div>
+        <span class="chevron">▼</span>
       </div>
-      <span class="arr">▶</span>
-    </div>
-    <div class="body">
-      <div class="syn"><div class="syn-lbl">구문</div>
-        <div class="syn-code">/scalp_watchlist</div>
-      </div>
-      <div class="rp-lbl">응답 예시</div>
-      <div class="rp"><span class="rk">⚡ [ 하이브리드 감시 목록 ]</span>
+      <div class="card-body">
+        <div class="divider"></div>
+        <div class="code-box"><span class="cmd">/balance</span></div>
+        <div class="output-box">[ 계좌 잔고 ]
+가용현금: 12,450,000원
+보유평가: 4,390,000원
+총 자산: 16,840,000원
 
-<span class="rh">▶ 감시 중 (2개)</span>
-  • <span class="rh">에코프로비엠(247540)</span> 📌 보유중
-    추가: 09:32
-  • <span class="rh">삼성전자(005930)</span>
-    추가: 10:15
-
-<span class="rd">⏹ 중단됨 (1개)</span>
-  • SK하이닉스(000660) — 2026-05-17 11:20
-
-<span class="rh">📊 실시간 현재가</span>
-📌 에코프로비엠(247540): <span class="rh">35,450원</span> <span class="rg">🔺+1.21%</span>
-   삼성전자(005930): <span class="rh">75,200원</span> <span class="rg">🔺+0.80%</span></div>
-      <div class="note note-p">
-        <span class="ni">💾</span>
-        <span>감시 목록은 <code>data/scalp_watchlist.json</code>에 영속화됩니다. 봇이 재시작되어도 감시 목록이 유지됩니다.</span>
+A 한도(25%): 4,210,000원
+B 한도(30%): 5,052,000원
+C 한도(30%): 5,052,000원</div>
       </div>
     </div>
-  </div>
 
-  <!-- 스캐너 vs 하이브리드 비교 -->
-  <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-top:6px;">
-    <div style="font-weight:600;font-size:12px;margin-bottom:10px;color:var(--text)">자동 스캔 vs 하이브리드 비교</div>
-    <table class="ptbl">
-      <thead><tr><th>항목</th><th>자동 스캔</th><th style="color:var(--pink)">🆕 하이브리드</th></tr></thead>
-      <tbody>
-        <tr><td>종목 선정</td><td>스캐너 자동 선정</td><td class="dc">유저가 직접 지정</td></tr>
-        <tr><td>상승률 필터</td><td>3~20% 조건</td><td style="color:var(--green)">우회 (조건 없음)</td></tr>
-        <tr><td>거래대금 필터</td><td>50억↑ 조건</td><td style="color:var(--green)">우회 (조건 없음)</td></tr>
-        <tr><td>거래량 필터</td><td>3배↑ 조건</td><td style="color:var(--green)">우회 (조건 없음)</td></tr>
-        <tr><td>포지션 수 제한</td><td>max_positions 적용</td><td>동일 적용</td></tr>
-        <tr><td>진입 시간 마감</td><td>entry_end_time 적용</td><td>동일 적용</td></tr>
-        <tr><td>손절/익절</td><td>동일 로직</td><td>동일 로직</td></tr>
-        <tr><td>트레일링 스탑</td><td>동일 로직</td><td>동일 로직</td></tr>
-        <tr><td>강제 청산 15:20</td><td>동일</td><td>동일</td></tr>
-        <tr><td>알림 표시</td><td>source: RISE_RANK 등</td><td class="dc">source: MANUAL</td></tr>
-        <tr><td>영속화</td><td>매 루프 재스캔</td><td class="dc">JSON 저장, 재시작 유지</td></tr>
-      </tbody>
-    </table>
-  </div>
-</div>
+    <!-- /version -->
+    <div class="card" data-cmd="/version">
+      <div class="card-hdr" onclick="toggle(this)">
+        <span class="badge b-blue">/version</span>
+        <div class="card-info"><div class="card-title">버전 정보</div><div class="card-desc">현재 버전과 최근 변경 이력을 출력합니다.</div></div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="divider"></div>
+        <div class="code-box"><span class="cmd">/version</span></div>
+        <div class="output-box">[ 버전 정보 ]
+현재: v3.0.0
 
-<!-- ===== 종가베팅 파라미터 ===== -->
-<div class="section" id="s10">
-  <div class="sec-hdr"><div class="sec-ico" style="background:var(--blue-bg)">📋</div><div><h2 style="color:var(--blue)">종가베팅 /config 전체 파라미터</h2><div class="sec-sub">strategy_config.json — /config set [키] [값]</div></div></div>
-  <table class="ptbl">
-    <thead><tr><th>키</th><th>기본값</th><th>설명</th></tr></thead>
-    <tbody>
-      <tr><td colspan="3" class="grp-row" style="color:var(--blue)">── SCAN ──</td></tr>
-      <tr><td class="kc">scan.min_trading_value</td><td class="dc">10000000000</td><td>거래대금 최소 (100억)</td></tr>
-      <tr><td class="kc">scan.surge_threshold_e</td><td class="dc">9.0</td><td>조건E 최소 급등률 (%)</td></tr>
-      <tr><td class="kc">scan.envelope_period</td><td class="dc">20</td><td>Envelope 이동평균 기간</td></tr>
-      <tr><td class="kc">scan.envelope_band_pct</td><td class="dc">20.0</td><td>Envelope 밴드 폭 (%)</td></tr>
-      <tr><td class="kc">scan.volume_ratio_min</td><td class="dc">1.5</td><td>전일 대비 거래량 최소 배수</td></tr>
-      <tr><td class="kc">scan.api_delay_sec</td><td class="dc">0.5</td><td>API 호출 간격 (초)</td></tr>
-      <tr><td colspan="3" class="grp-row" style="color:var(--blue)">── ENTRY ──</td></tr>
-      <tr><td class="kc">entry.pullback_min_pct</td><td class="dc">-10.0</td><td>매수 진입 최소 눌림 (%)</td></tr>
-      <tr><td class="kc">entry.pullback_max_pct</td><td class="dc">-0.5</td><td>매수 진입 최대 눌림 (%)</td></tr>
-      <tr><td class="kc">entry.entry_start_time</td><td class="dc">15:10</td><td>자동 매수 시작</td></tr>
-      <tr><td class="kc">entry.max_positions</td><td class="dc">3</td><td>최대 동시 보유 종목</td></tr>
-      <tr><td class="kc">entry.position_size_pct</td><td class="dc">15</td><td>종목당 자산 비율 (%)</td></tr>
-      <tr><td class="kc">entry.rsi_min / rsi_max</td><td class="dc">30 / 80</td><td>RSI 범위</td></tr>
-      <tr><td colspan="3" class="grp-row" style="color:var(--blue)">── RISK ──</td></tr>
-      <tr><td class="kc">risk.stop_loss_pct</td><td class="dc">-3.0</td><td>손절선 (%)</td></tr>
-      <tr><td class="kc">risk.take_profit_pct</td><td class="dc">5.0</td><td>익절선 (%)</td></tr>
-      <tr><td class="kc">risk.trailing_stop</td><td class="dc">true</td><td>트레일링 스탑</td></tr>
-      <tr><td class="kc">risk.trailing_gap_pct</td><td class="dc">2.0</td><td>트레일링 간격 (%)</td></tr>
-      <tr><td class="kc">risk.force_sell_time</td><td class="dc">15:00</td><td>D+1 강제청산 시각</td></tr>
-      <tr><td colspan="3" class="grp-row" style="color:var(--blue)">── SELL ──</td></tr>
-      <tr><td class="kc">sell.nxt_gap_target_pct</td><td class="dc">2.0</td><td>NXT 갭 즉시매도 기준 (%)</td></tr>
-      <tr><td class="kc">sell.morning_target_pct</td><td class="dc">3.0</td><td>오전 목표 수익률 (%)</td></tr>
-      <tr><td class="kc">sell.morning_sell_end</td><td class="dc">10:00</td><td>오전 매도 마감</td></tr>
-    </tbody>
-  </table>
-</div>
+🔴 v3.0.0 (2026-05-18) — 전략C 상한가선진입 추가
+🔴 v2.0.0 (2026-04-09) — 단타 main.py 통합
+🟡 v1.3.0 (2026-03-28) — 스코어링 개선</div>
+      </div>
+    </div>
 
-<!-- ===== 단타 파라미터 ===== -->
-<div class="section" id="s11">
-  <div class="sec-hdr"><div class="sec-ico" style="background:rgba(57,211,83,.12)">📋</div><div><h2 style="color:var(--teal)">단타 /scalp_config 전체 파라미터</h2><div class="sec-sub">scalp_config.json — /scalp_config set [키] [값]</div></div></div>
-  <table class="ptbl">
-    <thead><tr><th>키</th><th>기본값</th><th>설명</th><th>변경 예시</th></tr></thead>
-    <tbody>
-      <tr><td colspan="4" class="grp-row" style="color:var(--teal)">── SCAN ──</td></tr>
-      <tr><td class="kc">scan.min_rise_pct</td><td class="dc">3.0</td><td>최소 상승률 (%)</td><td class="sc">set scan.min_rise_pct 5.0</td></tr>
-      <tr><td class="kc">scan.max_rise_pct</td><td class="dc">20.0</td><td>최대 상승률 (%)</td><td class="sc">set scan.max_rise_pct 15.0</td></tr>
-      <tr><td class="kc">scan.min_trading_value</td><td class="dc">5000000000</td><td>거래대금 최소 (50억)</td><td class="sc">set scan.min_trading_value 10000000000</td></tr>
-      <tr><td class="kc">scan.volume_ratio_min</td><td class="dc">3.0</td><td>거래량 최소 배수</td><td class="sc">set scan.volume_ratio_min 5.0</td></tr>
-      <tr><td class="kc">scan.entry_end_time</td><td class="dc">14:30</td><td>진입 마감 시각</td><td class="sc">set scan.entry_end_time 13:00</td></tr>
-      <tr><td class="kc">scan.api_delay_sec</td><td class="dc">0.5</td><td>API 간격 (초)</td><td class="sc">set scan.api_delay_sec 0.3</td></tr>
-      <tr><td colspan="4" class="grp-row" style="color:var(--teal)">── ENTRY ──</td></tr>
-      <tr><td class="kc">entry.max_positions</td><td class="dc">3</td><td>최대 동시 보유</td><td class="sc">set entry.max_positions 2</td></tr>
-      <tr><td class="kc">entry.position_size_pct</td><td class="dc">20</td><td>종목당 투자 비율 (%)</td><td class="sc">set entry.position_size_pct 15</td></tr>
-      <tr><td class="kc">entry.use_vwap_filter</td><td class="dc">true</td><td>VWAP 필터</td><td class="sc">set entry.use_vwap_filter false</td></tr>
-      <tr><td class="kc">entry.cooldown_sec</td><td class="dc">300</td><td>재진입 쿨다운 (초)</td><td class="sc">set entry.cooldown_sec 600</td></tr>
-      <tr><td colspan="4" class="grp-row" style="color:var(--teal)">── EXIT ──</td></tr>
-      <tr><td class="kc">exit.take_profit_pct</td><td class="dc">2.5</td><td>익절선 → 실질 +2.29%</td><td class="sc">set exit.take_profit_pct 3.0</td></tr>
-      <tr><td class="kc">exit.stop_loss_pct</td><td class="dc">-1.5</td><td>손절선 → 실질 -1.71%</td><td class="sc">set exit.stop_loss_pct -2.0</td></tr>
-      <tr><td class="kc">exit.partial_profit_pct</td><td class="dc">1.5</td><td>부분 익절선 (%)</td><td class="sc">set exit.partial_profit_pct 1.2</td></tr>
-      <tr><td class="kc">exit.trailing_stop</td><td class="dc">true</td><td>트레일링 스탑</td><td class="sc">set exit.trailing_stop false</td></tr>
-      <tr><td class="kc">exit.trailing_gap_pct</td><td class="dc">1.0</td><td>트레일링 간격 (%)</td><td class="sc">set exit.trailing_gap_pct 1.5</td></tr>
-      <tr><td class="kc">exit.trailing_activate_pct</td><td class="dc">1.0</td><td>트레일링 활성화 수익률</td><td class="sc">set exit.trailing_activate_pct 1.5</td></tr>
-      <tr><td class="kc">exit.force_exit_time</td><td class="dc">15:20</td><td>강제 청산 시각</td><td class="sc">set exit.force_exit_time 15:00</td></tr>
-      <tr><td class="kc">exit.time_stop_minutes</td><td class="dc">60</td><td>시간 손절 (분)</td><td class="sc">set exit.time_stop_minutes 45</td></tr>
-      <tr><td colspan="4" class="grp-row" style="color:var(--teal)">── RISK ──</td></tr>
-      <tr><td class="kc">risk.daily_loss_limit_pct</td><td class="dc">-3.0</td><td>일일 손실 한도</td><td class="sc">set risk.daily_loss_limit_pct -2.0</td></tr>
-      <tr><td class="kc">risk.max_consecutive_loss</td><td class="dc">3</td><td>연속 손절 허용 횟수</td><td class="sc">set risk.max_consecutive_loss 2</td></tr>
-      <tr><td class="kc">risk.reserve_cash_pct</td><td class="dc">10</td><td>현금 보유 비율 (%)</td><td class="sc">set risk.reserve_cash_pct 20</td></tr>
-      <tr><td class="kc">risk.commission_rate</td><td class="dc">0.00015</td><td>수수료 (0.015%)</td><td class="sc">변경 불필요</td></tr>
-      <tr><td class="kc">risk.tax_rate_kosdaq</td><td class="dc">0.0018</td><td>거래세 (0.18%)</td><td class="sc">변경 불필요</td></tr>
-    </tbody>
-  </table>
-  <div class="note note-w" style="margin-top:12px">
-    <span class="ni">⚠️</span>
-    <span>수수료+거래세 약 <b>0.21%</b> — 손절 -1.5% 실질 <b>-1.71%</b>, 익절 +2.5% 실질 <b>+2.29%</b></span>
-  </div>
-</div>
+    <!-- /guide -->
+    <div class="card new-card" data-cmd="/guide">
+      <div class="card-hdr" onclick="toggle(this)">
+        <span class="badge b-pink">/guide</span>
+        <div class="card-info"><div class="card-title">명령어 가이드 출력 <span class="new-tag">NEW</span></div><div class="card-desc">섹션별 명령어 요약을 텔레그램으로 출력합니다.</div></div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="divider"></div>
+        <div class="param-grid">
+          <span class="param-key">[섹션]</span><span class="param-val">all · a · b · c · trade · report (기본: all)</span>
+        </div>
+        <div class="code-box"><span class="cmd">/guide</span>          <span class="cmt"># 전체 요약</span>
+<span class="cmd">/guide</span> <span class="arg">a</span>        <span class="cmt"># 전략A 명령어만</span>
+<span class="cmd">/guide</span> <span class="arg">c</span>        <span class="cmt"># 전략C 명령어만 (신규)</span>
+<span class="cmd">/guide</span> <span class="arg">trade</span>    <span class="cmt"># 수동 매매 명령어</span></div>
+        <div class="tip">💡 텔레그램 메시지 길이 제한으로 섹션별 분할 출력됩니다.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       성과 리포트 ★NEW
+  ════════════════════════════════════════════════════════════════ -->
+  <section class="section" id="sec-report-new" hidden>
+    <div class="sec-hdr">
+      <div class="sec-ico" style="background:var(--green-bg)">📊</div>
+      <div><h2>성과 리포트 / 알고리즘 분석<span class="sec-new">v3.1 NEW</span></h2>
+      <div class="sec-sub">일/주/월별 자동 발송 + 개선 힌트 + 심층 알고리즘 분석</div></div>
+    </div>
+
+    <div class="success">✅ v3.1.0 신규. 장 종료 후 자동으로 3전략 통합 성과를 텔레그램으로 발송합니다.</div>
+
+    <!-- 자동 발송 스케줄 -->
+    <div class="card new-card" data-cmd="자동발송">
+      <div class="card-hdr" onclick="toggle(this)">
+        <span class="badge b-green">자동 발송</span>
+        <div class="card-info"><div class="card-title">자동 성과 리포트 스케줄 <span class="new-tag">NEW</span></div><div class="card-desc">별도 명령 없이 장 종료 후 자동으로 텔레그램에 발송됩니다.</div></div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="divider"></div>
+        <div class="param-grid">
+          <span class="param-key">15:50 매일</span><span class="param-val">3전략 통합 일별 성과 + 오늘의 개선 힌트 자동 발송</span>
+          <span class="param-key">16:00 금요일</span><span class="param-val">주별 성과 + 주간 알고리즘 분석 자동 발송</span>
+          <span class="param-key">16:10 월말</span><span class="param-val">월별 성과 + 30일 심층 분석 자동 발송</span>
+        </div>
+        <div class="output-box">[ 일별 성과 — 2026-05-18 (Mon) ]
+
+📊 전략A 종가베팅
+  거래 2회 | 승률 50.0% (1승 1패)
+  총손익 +32,000원 | 평균 +16,000원
+  PF 1.8 | 평균보유 18.2h
+  🏆 에코프로비엠 +4.1% (+62,000원)
+  💔 삼성전자 -2.9% (-30,000원)
+
+⚡ 전략B 장중단타
+  거래 5회 | 승률 60.0% (3승 2패)
+  총손익 +18,500원 | PF 1.4
+
+🎯 전략C 상한가선진입
+  거래 없음
+
+━━━━━━━━━━━━━━━━━━━━
+📈 3전략 합계
+  총 7회 | 승률 57.1%
+  총손익 +50,500원
+  Profit Factor: 1.6
+
+💡 오늘의 개선 힌트
+  전략B: PF 1.4 낮음 → 익절폭 +1% 확대 검토</div>
+      </div>
+    </div>
+
+    <!-- /report_daily -->
+    <div class="card new-card" data-cmd="/report_daily">
+      <div class="card-hdr" onclick="toggle(this)">
+        <span class="badge b-green">/report_daily</span>
+        <div class="card-info"><div class="card-title">일별 성과 조회 <span class="new-tag">NEW</span></div><div class="card-desc">오늘 또는 특정 날짜의 3전략 성과를 조회합니다.</div></div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="divider"></div>
+        <div class="param-grid">
+          <span class="param-key">[날짜]</span><span class="param-val">YYYYMMDD 형식 (생략 시 오늘)</span>
+        </div>
+        <div class="code-box"><span class="cmd">/report_daily</span>            <span class="cmt"># 오늘</span>
+<span class="cmd">/report_daily</span> <span class="arg">20260501</span>   <span class="cmt"># 특정 날짜</span></div>
+      </div>
+    </div>
+
+    <!-- /report_weekly /report_monthly -->
+    <div class="card new-card" data-cmd="/report_weekly /report_monthly">
+      <div class="card-hdr" onclick="toggle(this)">
+        <span class="badge b-green">/report_weekly · /report_monthly</span>
+        <div class="card-info"><div class="card-title">주별 / 월별 성과 조회 <span class="new-tag">NEW</span></div><div class="card-desc">이번 주 또는 이번 달의 3전략 통합 성과를 조회합니다.</div></div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="divider"></div>
+        <div class="code-box"><span class="cmd">/report_weekly</span>    <span class="cmt"># 이번 주 성과</span>
+<span class="cmd">/report_monthly</span>   <span class="cmt"># 이번 달 성과</span>
+<span class="cmd">/report_all</span>       <span class="cmt"># 일+주+월 한번에</span></div>
+      </div>
+    </div>
+
+    <!-- /analysis -->
+    <div class="card new-card" data-cmd="/analysis">
+      <div class="card-hdr" onclick="toggle(this)">
+        <span class="badge b-teal">/analysis</span>
+        <div class="card-info"><div class="card-title">알고리즘 개선 분석 <span class="new-tag">NEW</span></div><div class="card-desc">데이터 기반으로 파라미터 조정 제안을 받습니다.</div></div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="divider"></div>
+        <div class="param-grid">
+          <span class="param-key">[일수]</span><span class="param-val">분석 기간 (기본 30일, 7·30·90 권장)</span>
+          <span class="param-key">[전략]</span><span class="param-val">A·B·C 중 하나 (생략 시 전체)</span>
+        </div>
+        <div class="code-box"><span class="cmd">/analysis</span>          <span class="cmt"># 최근 30일 전체</span>
+<span class="cmd">/analysis</span> <span class="arg">7</span>        <span class="cmt"># 최근 7일</span>
+<span class="cmd">/analysis</span> <span class="arg">30 C</span>     <span class="cmt"># 전략C 30일</span>
+<span class="cmd">/analysis</span> <span class="arg">90 A</span>     <span class="cmt"># 전략A 90일 심층분석</span></div>
+        <div class="output-box">🔬 [ 알고리즘 개선 분석 — 최근 30일 ]
+
+🎯 전략C 상한가선진입  18건 / 승률 61.1% / PF 1.7
+  요일별: Mon 71%(7) Tue 50%(4) Wed 60%(5) Thu 50%(2)
+  점수구간: 70~79점 45%(11) 80~89점 71%(7)
+  보유시간: <1h 승률40%/-1.2% 1~4h 승률55%/+2.1%
+  매도사유: 갭상승 8건(75%) 손절 5건(40%) 강제청산 5건(40%)
+  ▶ 개선 제안:
+    점수 80+ 승률 71% vs 80- 45% → composite_score_min 80 권장
+    손절 5/18건 → 진입 타이밍 재검토</div>
+        <div class="tip">💡 데이터가 5건 이상 쌓인 후부터 의미있는 분석이 가능합니다.</div>
+      </div>
+    </div>
+
+    <!-- 저장 구조 -->
+    <div class="card" data-cmd="저장구조">
+      <div class="card-hdr" onclick="toggle(this)">
+        <span class="badge b-blue">저장 구조</span>
+        <div class="card-info"><div class="card-title">성과 데이터 저장 위치</div><div class="card-desc">모든 매매 기록과 집계 스냅샷이 JSON으로 영구 저장됩니다.</div></div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="divider"></div>
+        <div class="code-box">data/performance/
+  ├── trades.json          <span class="cmt"># 전체 체결 기록 (최대 1만건)</span>
+  ├── daily/
+  │   └── 20260518.json    <span class="cmt"># 일별 집계 스냅샷</span>
+  ├── weekly/
+  │   └── 2026W20.json     <span class="cmt"># 주별 집계 스냅샷</span>
+  └── monthly/
+      └── 202605.json      <span class="cmt"># 월별 집계 스냅샷</span></div>
+        <div class="note">📌 trades.json은 append-only로 누적됩니다. 최대 1만건 초과 시 오래된 건부터 자동 삭제.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       전략A — 종가베팅
+  ════════════════════════════════════════════════════════════════ -->
+  <section class="section" id="sec-close" hidden>
+    <div class="sec-hdr"><div class="sec-ico" style="background:var(--green-bg)">📈</div><div><h2>전략A — 종가베팅</h2><div class="sec-sub">장 마감 직전 눌림 매수 → 익일 익절/손절</div></div></div>
+
+    <div class="card" data-cmd="/scan">
+      <div class="card-hdr" onclick="toggle(this)">
+        <span class="badge b-green">/scan</span>
+        <div class="card-info"><div class="card-title">후보 종목 스캔</div><div class="card-desc">종가베팅 후보를 즉시 스캔하고 결과를 로그에 저장합니다. (자동: 14:30)</div></div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="divider"></div>
+        <div class="code-box"><span class="cmd">/scan</span></div>
+        <div class="output-box">[ 14:30 종가베팅 스캔 ] 총 5개
+
+① 에코프로비엠(247540) 점수:87
+   등락: -2.1% | 거래대금: 3,240억
+   RSI:62 | MA정배열 ✓ | 수급:기관+외인
+
+② 한화에어로(012450) 점수:82
+   등락: -1.4% | 거래대금: 1,180억
+   RSI:71 | MA정배열 ✓ | 수급:기관+</div>
+        <div class="success">✅ 스캔 결과는 data/scan_log/ 에 자동 저장됩니다.</div>
+      </div>
+    </div>
+
+    <div class="card" data-cmd="/history">
+      <div class="card-hdr" onclick="toggle(this)">
+        <span class="badge b-green">/history</span>
+        <div class="card-info"><div class="card-title">전략A 매매 이력 조회</div><div class="card-desc">최근 체결 기록과 손익을 출력합니다.</div></div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="divider"></div>
+        <div class="code-box"><span class="cmd">/history</span></div>
+        <div class="output-box">[ 최근 매매 이력 ]
+2026-05-15  에코프로비엠  매수 @312,000
+2026-05-16  에코프로비엠  매도 @326,400  +4.6% ✓
+2026-05-14  삼성전자      매수 @78,500
+2026-05-15  삼성전자      매도 @75,700  -3.6% ✗</div>
+      </div>
+    </div>
+
+    <div class="card" data-cmd="/update_results">
+      <div class="card-hdr" onclick="toggle(this)">
+        <span class="badge b-green">/update_results</span>
+        <div class="card-info"><div class="card-title">전날 스캔 결과 업데이트</div><div class="card-desc">전날 스캔 후보들의 실제 등락을 기록하여 승률 분석에 활용합니다.</div></div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="divider"></div>
+        <div class="code-box"><span class="cmd">/update_results</span></div>
+        <div class="tip">💡 장 마감 후 실행하세요. 스캔 로그에 실제 결과가 추가됩니다.</div>
+      </div>
+    </div>
+
+    <div class="card" data-cmd="/lock /unlock">
+      <div class="card-hdr" onclick="toggle(this)">
+        <span class="badge b-yellow">/lock /unlock</span>
+        <div class="card-info"><div class="card-title">종목 당일 잠금 · 해제</div><div class="card-desc">특정 종목의 당일 자동 매수를 차단하거나 해제합니다.</div></div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="divider"></div>
+        <div class="param-grid">
+          <span class="param-key">[종목코드]</span><span class="param-val">6자리 종목 코드 (필수)</span>
+        </div>
+        <div class="code-box"><span class="cmd">/lock</span> <span class="arg">005930</span>    <span class="cmt"># 삼성전자 당일 매수 차단</span>
+<span class="cmd">/unlock</span> <span class="arg">005930</span>  <span class="cmt"># 차단 해제</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       전략B — 장중단타
+  ════════════════════════════════════════════════════════════════ -->
+  <section class="section" id="sec-scalp" hidden>
+    <div class="sec-hdr"><div class="sec-ico" style="background:var(--yellow-bg)">⚡</div><div><h2>전략B — 장중단타</h2><div class="sec-sub">09:00~13:00 급등 종목 당일 매매</div></div></div>
+
+    <div class="card" data-cmd="/scalp_scan">
+      <div class="card-hdr" onclick="toggle(this)">
+        <span class="badge b-yellow">/scalp_scan</span>
+        <div class="card-info"><div class="card-title">단타 즉시 스캔</div><div class="card-desc">현재 시점의 단타 후보를 즉시 스캔하여 출력합니다.</div></div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="divider"></div>
+        <div class="code-box"><span class="cmd">/scalp_scan</span></div>
+        <div class="output-box">[ 단타 스캔 결과 ] 09:42
+후보 3개 발견
+
+① 알테오젠(196170) 점수:78
+   등락: +8.4% | 거래량비: 5.2배
+   VWAP 돌파 ✓ | 체결강도:187%
+
+② POSCO홀딩스(005490) 점수:71
+   등락: +5.1% | 거래량비: 3.8배</div>
+      </div>
+    </div>
+
+    <div class="card" data-cmd="/scalp_status">
+      <div class="card-hdr" onclick="toggle(this)">
+        <span class="badge b-yellow">/scalp_status</span>
+        <div class="card-info"><div class="card-title">단타 보유 포지션 조회</div><div class="card-desc">현재 보유 중인 단타 포지션과 실시간 손익을 출력합니다.</div></div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="divider"></div>
+        <div class="code-box"><span class="cmd">/scalp_status</span></div>
+        <div class="output-box">[ 단타 포지션 ]
+알테오젠 20주 @168,000
+현재가 171,200 | +1.9%
+보유시간: 24분
+
+손절선: 165,480 | 익절: 174,720</div>
+      </div>
+    </div>
+
+    <div class="card" data-cmd="/scalp_pause /scalp_resume">
+      <div class="card-hdr" onclick="toggle(this)">
+        <span class="badge b-yellow">/scalp_pause</span>
+        <div class="card-info"><div class="card-title">단타 신규 진입 일시 정지 / 재개</div><div class="card-desc">신규 매수를 차단하되 기존 포지션 청산 감시는 계속됩니다.</div></div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="divider"></div>
+        <div class="code-box"><span class="cmd">/scalp_pause</span>    <span class="cmt"># 신규 진입 중단</span>
+<span class="cmd">/scalp_resume</span>   <span class="cmt"># 재개</span></div>
+        <div class="note">⚠️ /scalp_pause 후에도 보유 포지션 손절·익절은 정상 작동합니다.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       전략C — 상한가선진입 ★NEW
+  ════════════════════════════════════════════════════════════════ -->
+  <section class="section" id="sec-limit" hidden>
+    <div class="sec-hdr">
+      <div class="sec-ico" style="background:var(--pink-bg)">🎯</div>
+      <div><h2>전략C — 상한가선진입<span class="sec-new">v3.0 NEW</span></h2><div class="sec-sub">25% 급등 구간에서 7대 신호 복합 분석 → 상한가 도달 전 선진입</div></div>
+    </div>
+
+    <div class="success">✅ v3.0.0 신규 전략입니다. 7대 신호(테마·뉴스·수급·거래량·기술·소셜·시장)를 복합 분석하여 상한가 전 선진입합니다.</div>
+
+    <!-- /limit_scan -->
+    <div class="card new-card" data-cmd="/limit_scan">
+      <div class="card-hdr" onclick="toggle(this)">
+        <span class="badge b-pink">/limit_scan</span>
+        <div class="card-info"><div class="card-title">상한가선진입 즉시 스캔 <span class="new-tag">NEW</span></div><div class="card-desc">현재 25%+ 종목을 스캔하고 7대 신호 점수와 함께 후보를 출력합니다.</div></div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="divider"></div>
+        <div class="code-box"><span class="cmd">/limit_scan</span></div>
+        <div class="output-box">[ 전략C 스캔 결과 ] 11:24
+후보 3개 발견
+
+① 에코프로비엠(247540) 종합점수: 84점 ★매수신호
+   등락: +26.4% | 거래량배수: 8.2배
+   테마:92 수급:76 거래량:85 기술:72
+   잔량비율: 3.2% | 체결강도: 312%
+
+② 한화에어로(012450) 종합점수: 79점
+   등락: +25.1% | 거래량배수: 4.5배
+   테마:85 수급:88 거래량:71 기술:65</div>
+        <div class="tip">💡 자동 스캔은 09:00~14:30 30초 주기로 실행됩니다.</div>
+      </div>
+    </div>
+
+    <!-- /limit_status -->
+    <div class="card new-card" data-cmd="/limit_status">
+      <div class="card-hdr" onclick="toggle(this)">
+        <span class="badge b-pink">/limit_status</span>
+        <div class="card-info"><div class="card-title">전략C 보유 포지션 조회 <span class="new-tag">NEW</span></div><div class="card-desc">상한가선진입 전략의 현재 보유 종목과 매도 대기 상태를 출력합니다.</div></div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="divider"></div>
+        <div class="code-box"><span class="cmd">/limit_status</span></div>
+        <div class="output-box">[ 전략C 포지션 ]
+에코프로비엠(247540)
+  매수가: 312,000원 | 수량: 5주
+  매수시각: 11:24 | 점수: 84점
+  테마: 2차전지
+  
+  현재가: 329,000 | +5.4%
+  손절선: 296,400 | 목표: 327,600
+  
+  ★ 익일 매도 대기 중
+  갭+5%↑ → 전량  |  갭+2%↑ → 절반</div>
+      </div>
+    </div>
+
+    <!-- /limit_resume -->
+    <div class="card new-card" data-cmd="/limit_resume">
+      <div class="card-hdr" onclick="toggle(this)">
+        <span class="badge b-pink">/limit_resume</span>
+        <div class="card-info"><div class="card-title">전략C 연속손절 후 재개 <span class="new-tag">NEW</span></div><div class="card-desc">연속 손절로 자동 정지된 전략C를 수동으로 재개합니다.</div></div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="divider"></div>
+        <div class="code-box"><span class="cmd">/limit_resume</span></div>
+        <div class="warn">⚠️ 연속 손절이 발생한 이유를 먼저 확인 후 재개하세요.</div>
+        <div class="note">📌 자동 정지 조건: 연속 손절 3회 (risk.max_consecutive_loss 설정)</div>
+      </div>
+    </div>
+
+    <!-- 7대 신호 설명 -->
+    <div class="card" data-cmd="신호 점수">
+      <div class="card-hdr" onclick="toggle(this)">
+        <span class="badge b-purple">점수 구조</span>
+        <div class="card-info"><div class="card-title">7대 복합 신호 가중치 구조</div><div class="card-desc">종합 점수 0~100점 — 70점 이상 시 매수 신호 발생</div></div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="divider"></div>
+        <table class="score-table">
+          <tr><th>신호</th><th>가중치</th><th>주요 판단 기준</th></tr>
+          <tr><td>🔴 테마 모멘텀</td><td>25%</td><td>동일 테마 선행 종목 상한가 비율</td></tr>
+          <tr><td>📰 뉴스 감성</td><td>20%</td><td>공시·뉴스 키워드 강도 차등 가중</td></tr>
+          <tr><td>🏛 기관·외인 수급</td><td>20%</td><td>순매수 전환 감지</td></tr>
+          <tr><td>📊 거래량 패턴</td><td>15%</td><td>전일比 폭발 + 매수 비중</td></tr>
+          <tr><td>📈 기술적 지표</td><td>10%</td><td>이평선 정배열 / RSI / 잔량 굳히기</td></tr>
+          <tr><td>💬 소셜 버즈</td><td>5%</td><td>커뮤니티 관심도 (예정)</td></tr>
+          <tr><td>🌏 시장 흐름</td><td>5%</td><td>KOSPI/KOSDAQ 방향성</td></tr>
+        </table>
+        <div class="tip">💡 /limit_config set signal.composite_score_min 75 로 임계값을 올려 오신호를 줄일 수 있습니다.</div>
+      </div>
+    </div>
+
+    <!-- 익일 매도 가이드 -->
+    <div class="card" data-cmd="익일매도">
+      <div class="card-hdr" onclick="toggle(this)">
+        <span class="badge b-orange">익일 매도</span>
+        <div class="card-info"><div class="card-title">갭 구간별 자동 매도 전략</div><div class="card-desc">익일 아침 갭 상황에 따라 자동으로 매도 방식이 결정됩니다.</div></div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="divider"></div>
+        <div class="param-grid">
+          <span class="param-key">갭 +5% 이상</span><span class="param-val">동시호가 전량 매도 (08:30~08:50 자동 주문)</span>
+          <span class="param-key">갭 +2~5%</span><span class="param-val">동시호가 50% + 장초반 09:00~09:10 나머지 50%</span>
+          <span class="param-key">갭 보합</span><span class="param-val">09:30 강제청산 (시간 도래 시)</span>
+          <span class="param-key">갭 -3% 이하</span><span class="param-val">즉시 시장가 손절</span>
+        </div>
+        <div class="warn">⚠️ 09:30 이후까지 미청산 잔량은 무조건 강제청산됩니다.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       포지션 레지스트리 ★NEW
+  ════════════════════════════════════════════════════════════════ -->
+  <section class="section" id="sec-registry" hidden>
+    <div class="sec-hdr">
+      <div class="sec-ico" style="background:var(--purple-bg)">🔒</div>
+      <div><h2>포지션 레지스트리<span class="sec-new">v3.0 NEW</span></h2><div class="sec-sub">3전략 중복 매수·자금 경합 방지 시스템</div></div>
+    </div>
+
+    <div class="success">✅ v3.0.0 신규. 3전략이 동일 종목을 중복 매수하거나 자금을 초과하지 않도록 전역에서 관리합니다.</div>
+
+    <div class="card new-card" data-cmd="/registry">
+      <div class="card-hdr" onclick="toggle(this)">
+        <span class="badge b-purple">/registry</span>
+        <div class="card-info"><div class="card-title">레지스트리 전체 현황 조회 <span class="new-tag">NEW</span></div><div class="card-desc">3전략 보유 종목, 자금 한도, 쿨다운 블랙리스트를 한눈에 확인합니다.</div></div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="divider"></div>
+        <div class="code-box"><span class="cmd">/registry</span></div>
+        <div class="output-box">[ 포지션 레지스트리 ]
+A | 에코프로비엠 | 5주 @312,000 | 1,560,000원
+C | 한화에어로    | 3주 @284,000 |   852,000원
+
+[ 자금 사용 현황 ]
+A: 1,560,000 / 4,200,000원 (37%)
+B: 0 / 5,040,000원 (0%)
+C: 852,000 / 5,040,000원 (17%)
+
+[ 쿨다운 블랙리스트 ]
+240810 → 10:45 해제 (손절 후 대기)</div>
+        <div class="tip">💡 손절 후 30분간 같은 종목 재매수가 자동 차단됩니다.</div>
+      </div>
+    </div>
+
+    <div class="card" data-cmd="레지스트리 규칙">
+      <div class="card-hdr" onclick="toggle(this)">
+        <span class="badge b-purple">규칙</span>
+        <div class="card-info"><div class="card-title">레지스트리 충돌 해소 규칙</div><div class="card-desc">전략 간 동일 종목 충돌 시 우선순위에 따라 처리됩니다.</div></div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="divider"></div>
+        <div class="param-grid">
+          <span class="param-key">전략 우선순위</span><span class="param-val">C(3) &gt; A(2) &gt; B(1) — 높을수록 우선 진입</span>
+          <span class="param-key">자금 한도</span><span class="param-val">A 25% / B 30% / C 30% / 예비 10%</span>
+          <span class="param-key">중복 차단</span><span class="param-val">같은 종목을 낮은 우선순위 전략이 이미 보유 시 차단</span>
+          <span class="param-key">손절 쿨다운</span><span class="param-val">손절 후 30분간 전 전략에서 해당 종목 매수 금지</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       전략A 설정
+  ════════════════════════════════════════════════════════════════ -->
+  <section class="section" id="sec-cfg-a" hidden>
+    <div class="sec-hdr"><div class="sec-ico" style="background:var(--orange-bg)">⚙️</div><div><h2>전략A 설정 (/config)</h2><div class="sec-sub">종가베팅 전략 파라미터 런타임 변경</div></div></div>
+
+    <div class="card" data-cmd="/config show">
+      <div class="card-hdr" onclick="toggle(this)">
+        <span class="badge b-orange">/config show</span>
+        <div class="card-info"><div class="card-title">전략A 설정 조회</div><div class="card-desc">섹션별로 현재 설정 값을 출력합니다.</div></div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="divider"></div>
+        <div class="param-grid">
+          <span class="param-key">[섹션]</span><span class="param-val">scan · entry · risk · sell (생략 시 전체)</span>
+        </div>
+        <div class="code-box"><span class="cmd">/config show</span>            <span class="cmt"># 전체</span>
+<span class="cmd">/config show</span> <span class="arg">scan</span>      <span class="cmt"># 스캔 조건만</span>
+<span class="cmd">/config show</span> <span class="arg">entry</span>     <span class="cmt"># 진입 조건만</span>
+<span class="cmd">/config show</span> <span class="arg">risk</span>      <span class="cmt"># 리스크만</span></div>
+      </div>
+    </div>
+
+    <div class="card" data-cmd="/config set">
+      <div class="card-hdr" onclick="toggle(this)">
+        <span class="badge b-orange">/config set</span>
+        <div class="card-info"><div class="card-title">전략A 설정 변경</div><div class="card-desc">키·값으로 개별 파라미터를 즉시 변경합니다 (재시작 불필요).</div></div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="divider"></div>
+        <div class="code-box"><span class="cmd">/config set</span> <span class="arg">entry.max_positions 5</span>
+<span class="cmd">/config set</span> <span class="arg">entry.position_size_pct 10</span>
+<span class="cmd">/config set</span> <span class="arg">risk.stop_loss_pct -4.0</span>
+<span class="cmd">/config set</span> <span class="arg">entry.position_size_pct 0</span>  <span class="cmt"># 자동매수 차단</span></div>
+        <div class="note">📌 주요 파라미터: entry.pullback_min_pct · scan.min_trading_value · risk.trailing_gap_pct</div>
+      </div>
+    </div>
+
+    <div class="card" data-cmd="/config reset">
+      <div class="card-hdr" onclick="toggle(this)">
+        <span class="badge b-red">/config reset</span>
+        <div class="card-info"><div class="card-title">전략A 설정 기본값 초기화</div><div class="card-desc">모든 설정을 기본값으로 되돌립니다.</div></div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="divider"></div>
+        <div class="warn">⚠️ 모든 커스텀 설정이 삭제됩니다. 신중하게 사용하세요.</div>
+        <div class="code-box"><span class="cmd">/config reset</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       전략B 설정
+  ════════════════════════════════════════════════════════════════ -->
+  <section class="section" id="sec-cfg-b" hidden>
+    <div class="sec-hdr"><div class="sec-ico" style="background:var(--yellow-bg)">⚙️</div><div><h2>전략B 설정 (/scalp_config)</h2><div class="sec-sub">장중단타 전략 파라미터 런타임 변경</div></div></div>
+    <div class="card" data-cmd="/scalp_config show">
+      <div class="card-hdr" onclick="toggle(this)">
+        <span class="badge b-yellow">/scalp_config show</span>
+        <div class="card-info"><div class="card-title">단타 설정 조회</div><div class="card-desc">단타 전략의 현재 설정 값을 출력합니다.</div></div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="divider"></div>
+        <div class="code-box"><span class="cmd">/scalp_config show</span>
+<span class="cmd">/scalp_config show</span> <span class="arg">exit</span>    <span class="cmt"># 매도 설정만</span>
+<span class="cmd">/scalp_config show</span> <span class="arg">scan</span>    <span class="cmt"># 스캔 설정만</span></div>
+      </div>
+    </div>
+    <div class="card" data-cmd="/scalp_config set">
+      <div class="card-hdr" onclick="toggle(this)">
+        <span class="badge b-yellow">/scalp_config set</span>
+        <div class="card-info"><div class="card-title">단타 설정 변경</div><div class="card-desc">단타 파라미터를 즉시 변경합니다.</div></div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="divider"></div>
+        <div class="code-box"><span class="cmd">/scalp_config set</span> <span class="arg">exit.take_profit_pct 1.5</span>
+<span class="cmd">/scalp_config set</span> <span class="arg">exit.stop_loss_pct -1.0</span>
+<span class="cmd">/scalp_config set</span> <span class="arg">entry.max_positions 2</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       전략C 설정 ★NEW
+  ════════════════════════════════════════════════════════════════ -->
+  <section class="section" id="sec-cfg-c" hidden>
+    <div class="sec-hdr">
+      <div class="sec-ico" style="background:var(--pink-bg)">⚙️</div>
+      <div><h2>전략C 설정 (/limit_config)<span class="sec-new">v3.0 NEW</span></h2><div class="sec-sub">상한가선진입 전략 파라미터 런타임 변경</div></div>
+    </div>
+
+    <div class="card new-card" data-cmd="/limit_config show">
+      <div class="card-hdr" onclick="toggle(this)">
+        <span class="badge b-pink">/limit_config show</span>
+        <div class="card-info"><div class="card-title">전략C 설정 조회 <span class="new-tag">NEW</span></div><div class="card-desc">섹션별 현재 설정 값을 출력합니다.</div></div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="divider"></div>
+        <div class="param-grid">
+          <span class="param-key">[섹션]</span><span class="param-val">scan · signal · entry · exit · risk (생략 시 전체)</span>
+        </div>
+        <div class="code-box"><span class="cmd">/limit_config show</span>
+<span class="cmd">/limit_config show</span> <span class="arg">signal</span>   <span class="cmt"># 신호 기준만</span>
+<span class="cmd">/limit_config show</span> <span class="arg">exit</span>     <span class="cmt"># 매도 전략만</span></div>
+        <div class="output-box">[ 전략C 설정 — 신호 기준 ]
+  signal.composite_score_min = 70
+  signal.sell_remain_ratio_max = 0.1
+  signal.strength_min = 150
+  signal.theme_lead_required = True</div>
+      </div>
+    </div>
+
+    <div class="card new-card" data-cmd="/limit_config set">
+      <div class="card-hdr" onclick="toggle(this)">
+        <span class="badge b-pink">/limit_config set</span>
+        <div class="card-info"><div class="card-title">전략C 설정 변경 <span class="new-tag">NEW</span></div><div class="card-desc">상한가선진입 전략 파라미터를 즉시 변경합니다 (재시작 불필요).</div></div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="divider"></div>
+        <div class="code-box"><span class="cmt"># 스캔 조건</span>
+<span class="cmd">/limit_config set</span> <span class="arg">scan.entry_pct_min 26</span>
+<span class="cmd">/limit_config set</span> <span class="arg">scan.scan_stop_time 13:30</span>
+<span class="cmd">/limit_config set</span> <span class="arg">scan.vol_ratio_min 4.0</span>
+
+<span class="cmt"># 신호 기준</span>
+<span class="cmd">/limit_config set</span> <span class="arg">signal.composite_score_min 75</span>
+<span class="cmd">/limit_config set</span> <span class="arg">signal.strength_min 180</span>
+<span class="cmd">/limit_config set</span> <span class="arg">signal.theme_lead_required false</span>
+
+<span class="cmt"># 진입 조건</span>
+<span class="cmd">/limit_config set</span> <span class="arg">entry.max_positions 1</span>   <span class="cmt"># 보수적 1종목</span>
+<span class="cmd">/limit_config set</span> <span class="arg">entry.position_size_pct 8</span>
+
+<span class="cmt"># 매도 전략</span>
+<span class="cmd">/limit_config set</span> <span class="arg">exit.next_day_gap_full_pct 3.0</span>
+<span class="cmd">/limit_config set</span> <span class="arg">exit.stop_loss_pct -4.0</span>
+<span class="cmd">/limit_config set</span> <span class="arg">exit.force_sell_time 09:20</span></div>
+        <div class="tip">💡 처음 운용 시 composite_score_min 을 80 이상으로 높게 설정하여 오신호를 줄이세요.</div>
+      </div>
+    </div>
+
+    <div class="card new-card" data-cmd="/limit_config reset">
+      <div class="card-hdr" onclick="toggle(this)">
+        <span class="badge b-red">/limit_config reset</span>
+        <div class="card-info"><div class="card-title">전략C 설정 기본값 초기화 <span class="new-tag">NEW</span></div><div class="card-desc">전략C 모든 설정을 기본값으로 되돌립니다.</div></div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="divider"></div>
+        <div class="warn">⚠️ 모든 커스텀 설정이 삭제됩니다.</div>
+        <div class="code-box"><span class="cmd">/limit_config reset</span></div>
+      </div>
+    </div>
+
+    <!-- 파라미터 참고표 -->
+    <div class="card" data-cmd="파라미터 참고표">
+      <div class="card-hdr" onclick="toggle(this)">
+        <span class="badge b-purple">파라미터 참고표</span>
+        <div class="card-info"><div class="card-title">전략C 전체 파라미터 목록</div><div class="card-desc">설정 가능한 모든 파라미터와 기본값을 확인합니다.</div></div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="divider"></div>
+        <table class="score-table">
+          <tr><th>키</th><th>기본값</th><th>설명</th></tr>
+          <tr><td>scan.entry_pct_min</td><td>25.0</td><td>스캔 시작 등락률 (%)</td></tr>
+          <tr><td>scan.vol_ratio_min</td><td>3.0</td><td>거래량 배수 (전일比)</td></tr>
+          <tr><td>scan.scan_stop_time</td><td>14:30</td><td>신규 스캔 중단 시각</td></tr>
+          <tr><td>signal.composite_score_min</td><td>70</td><td>복합 점수 최소값</td></tr>
+          <tr><td>signal.sell_remain_ratio_max</td><td>0.10</td><td>매도잔량/매수잔량 최대</td></tr>
+          <tr><td>signal.strength_min</td><td>150</td><td>체결강도 최소 (%)</td></tr>
+          <tr><td>signal.theme_lead_required</td><td>true</td><td>테마 선행 필수 여부</td></tr>
+          <tr><td>entry.max_positions</td><td>2</td><td>최대 동시 보유 종목</td></tr>
+          <tr><td>entry.position_size_pct</td><td>12</td><td>종목당 투자 비율 (%)</td></tr>
+          <tr><td>exit.next_day_gap_full_pct</td><td>5.0</td><td>전량 매도 갭 기준 (%)</td></tr>
+          <tr><td>exit.next_day_gap_half_pct</td><td>2.0</td><td>절반 매도 갭 기준 (%)</td></tr>
+          <tr><td>exit.stop_loss_pct</td><td>-5.0</td><td>당일 손절선 (%)</td></tr>
+          <tr><td>exit.next_day_stop_loss_pct</td><td>-3.0</td><td>익일 손절선 (%)</td></tr>
+          <tr><td>exit.force_sell_time</td><td>09:30</td><td>익일 강제청산 시각</td></tr>
+          <tr><td>risk.max_consecutive_loss</td><td>3</td><td>연속 손절 허용 횟수</td></tr>
+          <tr><td>risk.daily_loss_limit_pct</td><td>2.0</td><td>당일 최대 손실 한도 (%)</td></tr>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       수동 매매
+  ════════════════════════════════════════════════════════════════ -->
+  <section class="section" id="sec-trade" hidden>
+    <div class="sec-hdr"><div class="sec-ico" style="background:var(--red-bg)">🖐</div><div><h2>수동 매매</h2><div class="sec-sub">텔레그램으로 직접 주문 실행</div></div></div>
+
+    <div class="card" data-cmd="/buy">
+      <div class="card-hdr" onclick="toggle(this)">
+        <span class="badge b-green">/buy</span>
+        <div class="card-info"><div class="card-title">수동 매수</div><div class="card-desc">지정가 또는 시장가 매수 주문을 실행합니다.</div></div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="divider"></div>
+        <div class="param-grid">
+          <span class="param-key">[종목코드]</span><span class="param-val">6자리 코드 (필수)</span>
+          <span class="param-key">[수량]</span><span class="param-val">매수할 주수 (필수)</span>
+          <span class="param-key">[가격]</span><span class="param-val">지정가 (0 입력 시 시장가)</span>
+        </div>
+        <div class="code-box"><span class="cmd">/buy</span> <span class="arg">005930 10 75000</span>   <span class="cmt"># 삼성전자 10주 @75,000</span>
+<span class="cmd">/buy</span> <span class="arg">005930 10 0</span>       <span class="cmt"># 시장가 매수</span></div>
+        <div class="warn">⚠️ 수동 매수는 포지션 레지스트리 체크 후 실행됩니다.</div>
+      </div>
+    </div>
+
+    <div class="card" data-cmd="/sell">
+      <div class="card-hdr" onclick="toggle(this)">
+        <span class="badge b-red">/sell</span>
+        <div class="card-info"><div class="card-title">수동 매도</div><div class="card-desc">지정가 또는 시장가 매도 주문을 실행합니다.</div></div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="divider"></div>
+        <div class="code-box"><span class="cmd">/sell</span> <span class="arg">005930 10 76000</span>  <span class="cmt"># 지정가 매도</span>
+<span class="cmd">/sell</span> <span class="arg">005930 10 0</span>      <span class="cmt"># 시장가 매도</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       분석 / 리포트
+  ════════════════════════════════════════════════════════════════ -->
+  <section class="section" id="sec-report" hidden>
+    <div class="sec-hdr"><div class="sec-ico" style="background:rgba(57,211,83,.12)">📊</div><div><h2>분석 / 리포트</h2><div class="sec-sub">승률 분석, 일간 결산, 스캔 로그 활용</div></div></div>
+
+    <div class="card" data-cmd="/report">
+      <div class="card-hdr" onclick="toggle(this)">
+        <span class="badge b-teal">/report</span>
+        <div class="card-info"><div class="card-title">전략A 승률 분석</div><div class="card-desc">최근 N일간 스캔 후보의 실제 성과를 조건별로 분석합니다.</div></div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="divider"></div>
+        <div class="param-grid">
+          <span class="param-key">[일수]</span><span class="param-val">분석 기간 일수 (기본: 7)</span>
+        </div>
+        <div class="code-box"><span class="cmd">/report</span>       <span class="cmt"># 최근 7일</span>
+<span class="cmd">/report</span> <span class="arg">14</span>    <span class="cmt"># 최근 14일</span>
+<span class="cmd">/report</span> <span class="arg">30</span>    <span class="cmt"># 최근 30일</span></div>
+        <div class="output-box">[ 전략A 승률 분석 — 최근 7일 ]
+총 28개 후보 / 승률: 64.3%
+평균 수익: +2.8% | 평균 손실: -2.1%
+
+거래대금 1000억+ : 승률 72%
+RSI 60~70       : 승률 69%
+눌림 -3~-5%     : 승률 71%</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       자동 스케줄표
+  ════════════════════════════════════════════════════════════════ -->
+  <section class="section" id="sec-schedule" hidden>
+    <div class="sec-hdr"><div class="sec-ico" style="background:var(--green-bg)">🕐</div><div><h2>자동 스케줄표</h2><div class="sec-sub">KST 평일 기준 — 수동 개입 없이 자동 실행</div></div></div>
+
+    <div class="card" data-cmd="전략A 스케줄">
+      <div class="card-hdr" onclick="toggle(this)">
+        <span class="badge b-green">전략A — 종가베팅</span>
+        <div class="card-info"><div class="card-title">종가베팅 자동 스케줄</div><div class="card-desc">14:30 스캔 → 15:10 매수 → 익일 매도 감시</div></div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="divider"></div>
+        <div class="param-grid">
+          <span class="param-key">09:00</span><span class="param-val">API 토큰 갱신</span>
+          <span class="param-key">14:30</span><span class="param-val">후보 종목 사전 스캔 + 텔레그램 알림</span>
+          <span class="param-key">15:10</span><span class="param-val">눌림 확인 + 자동 매수</span>
+          <span class="param-key">15:30</span><span class="param-val">전체 잠금 초기화 + 일일 손익 리셋</span>
+          <span class="param-key">08:00~08:50</span><span class="param-val">D+1 NXT 프리마켓 감시 (매분)</span>
+          <span class="param-key">09:00~10:00</span><span class="param-val">D+1 오전 익절/손절 감시 (매분)</span>
+          <span class="param-key">15:00</span><span class="param-val">D+1 미청산 강제 청산</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" data-cmd="전략B 스케줄">
+      <div class="card-hdr" onclick="toggle(this)">
+        <span class="badge b-yellow">전략B — 장중단타</span>
+        <div class="card-info"><div class="card-title">단타 자동 스케줄</div><div class="card-desc">09:00~13:00 신규 진입 → 15:20 강제청산</div></div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="divider"></div>
+        <div class="param-grid">
+          <span class="param-key">08:50</span><span class="param-val">장전 준비 (거래량 캐시 + 잔고 확인)</span>
+          <span class="param-key">09:00~15:25</span><span class="param-val">스캔/매매 루프 (30초 주기)</span>
+          <span class="param-key">13:00</span><span class="param-val">신규 진입 중단 (청산 감시 계속)</span>
+          <span class="param-key">15:10</span><span class="param-val">강제 청산 10분 전 경고</span>
+          <span class="param-key">15:20</span><span class="param-val">전량 강제 청산</span>
+          <span class="param-key">15:35</span><span class="param-val">당일 결산 리포트</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card new-card" data-cmd="전략C 스케줄">
+      <div class="card-hdr" onclick="toggle(this)">
+        <span class="badge b-pink">전략C — 상한가선진입 ★NEW</span>
+        <div class="card-info"><div class="card-title">선진입 자동 스케줄</div><div class="card-desc">09:00~14:30 진입 → 익일 09:30 강제청산</div></div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="divider"></div>
+        <div class="param-grid">
+          <span class="param-key">08:50</span><span class="param-val">장전 초기화 (거래량 캐시 + 포지션 복원)</span>
+          <span class="param-key">08:00~09:30</span><span class="param-val">익일 아침 갭 매도 감시 (매분)</span>
+          <span class="param-key">09:00~14:30</span><span class="param-val">장중 스캔·진입·청산 루프 (30초)</span>
+          <span class="param-key">09:25</span><span class="param-val">강제청산 5분 전 경고</span>
+          <span class="param-key">09:30</span><span class="param-val">익일 미청산 전량 강제청산</span>
+          <span class="param-key">15:40</span><span class="param-val">전략C 당일 결산 리포트</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" data-cmd="공통 스케줄">
+      <div class="card-hdr" onclick="toggle(this)">
+        <span class="badge b-blue">공통</span>
+        <div class="card-info"><div class="card-title">공통 자동 스케줄</div><div class="card-desc">로그 정리 등 공통 작업</div></div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="divider"></div>
+        <div class="param-grid">
+          <span class="param-key">06:00</span><span class="param-val">로그 7일 초과분 자동 삭제</span>
+        </div>
+      </div>
+    </div>
+  </section>
 
 </main>
+
 <script>
-function tog(h){h.parentElement.classList.toggle('open');}
-function doSearch(q){
-  q=q.trim().toLowerCase();
-  document.querySelectorAll('.card').forEach(c=>{c.classList.toggle('hidden',q&&!c.textContent.toLowerCase().includes(q));});
-  document.querySelectorAll('.ptbl tbody tr').forEach(r=>{r.classList.toggle('hidden',q&&!r.textContent.toLowerCase().includes(q));});
+function toggle(hdr){
+  const body=hdr.nextElementSibling;
+  const ch=hdr.querySelector('.chevron');
+  const open=body.classList.toggle('open');
+  ch.style.transform=open?'rotate(180deg)':'';
 }
-window.addEventListener('scroll',()=>{
-  const ss=document.querySelectorAll('.section'),ni=document.querySelectorAll('.nav-item');
-  let cur='';ss.forEach(s=>{if(scrollY>=s.offsetTop-120)cur=s.id;});
-  ni.forEach(i=>i.classList.toggle('active',i.getAttribute('href')==='#'+cur));
-});
+function showSection(id){
+  document.querySelectorAll('.section').forEach(s=>s.hidden=true);
+  document.getElementById(id).hidden=false;
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  event.currentTarget.classList.add('active');
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+function doSearch(q){
+  const term=q.trim().toLowerCase();
+  const noRes=document.getElementById('no-results');
+  document.querySelectorAll('.section').forEach(s=>s.hidden=false);
+  if(!term){
+    showSection('sec-common');
+    noRes.style.display='none';
+    return;
+  }
+  let found=0;
+  document.querySelectorAll('.card').forEach(c=>{
+    const text=c.textContent.toLowerCase();
+    const match=text.includes(term);
+    c.style.display=match?'':'none';
+    if(match)found++;
+  });
+  noRes.style.display=found===0?'block':'none';
+}
+// 첫 로드 시 전체 섹션 표시, 공통만 활성
+document.querySelectorAll('.section').forEach((s,i)=>{s.hidden=(i!==0);});
 </script>
 </body>
 </html>

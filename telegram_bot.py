@@ -1,6 +1,6 @@
 """
 telegram_bot.py — 키움 국내주식 자동매매 텔레그램 봇
-종가베팅 + 단타 전략 통합 버전
+종가베팅 + 단타 + 상한가선진입 3전략 통합 버전  v3.0.0
 
 [종가베팅 명령어]
   /start           — 봇 시작 및 명령어 안내
@@ -24,9 +24,17 @@ telegram_bot.py — 키움 국내주식 자동매매 텔레그램 봇
   /scalp_stop      — 단타 신규 진입 ON/OFF 토글
   /scalp_exit_all  — 단타 보유 종목 전량 즉시 청산
 
-[v2.0 변경]
-  단타 봇(scalp_main.py) → 기존 main.py + telegram_bot.py에 통합
-  동일 텔레그램 봇 토큰으로 두 전략을 동시 운영
+[상한가선진입 명령어 — v3.0 NEW]
+  /limit_scan      — 25%+ 종목 즉시 스캔 (7대 신호 점수)
+  /limit_status    — 전략C 포지션 + 익일 매도 대기 현황
+  /limit_resume    — 연속손절 후 전략C 수동 재개
+  /limit_config    — 전략C 설정 조회/변경
+  /registry        — 3전략 포지션 레지스트리 현황
+
+[v3.0 변경]
+  전략C 상한가선진입 추가 — 25%+ 구간 7대 신호 복합분석
+  PositionRegistry — 3전략 충돌·자금 경합 방지
+  /guide 업데이트 — 전략C 섹션 추가
 """
 
 import asyncio
@@ -67,21 +75,35 @@ class TelegramBot:
                  # ── 단타 전략 컴포넌트 (선택적) ──────────────
                  scanner=None,         # DayTradingScanner
                  scalp_strategy=None,  # ScalpStrategy
-                 scalp_cfg=None):      # ScalpConfig
+                 scalp_cfg=None,       # ScalpConfig
+                 # ── 전략C 상한가선진입 컴포넌트 (선택적) ─────
+                 limit_strategy=None,  # LimitStrategy
+                 limit_cfg=None,       # LimitConfig
+                 limit_scanner=None,   # LimitScanner
+                 registry=None,        # PositionRegistry
+                 tracker=None):        # PerformanceTracker  v3.1
         self.broker         = broker
         self.cfg            = cfg
         self.scfg           = scfg
         self.strategy       = strategy
         self.scan_logger    = ScanLogger()
-        self.scalp_ledger   = ScalpLedger()   # 단타 매매 장부
+        self.scalp_ledger   = ScalpLedger()
         self.app            = None
 
-        # 단타 컴포넌트 (main.py에서 주입)
+        # 단타 컴포넌트
         self.scanner        = scanner
         self.scalp_strategy = scalp_strategy
         self.scalp_cfg      = scalp_cfg
 
-        # 단타 신규 진입 ON/OFF 플래그 (/scalp_stop 으로 토글)
+        # 전략C 컴포넌트
+        self.limit_strategy = limit_strategy
+        self.limit_cfg      = limit_cfg
+        self.limit_scanner  = limit_scanner
+        self.registry       = registry
+
+        # 성과 추적기 (v3.1)
+        self.tracker        = tracker
+
         self.scalp_paused   = False
 
     # ──────────────────────────────────────────────────────────
@@ -136,6 +158,28 @@ class TelegramBot:
             ]
             logger.info("[TelegramBot] 단타 명령어 등록 완료")
 
+        # ── 전략C 상한가선진입 명령어 (v3.0 NEW) ─────────────
+        if self.limit_strategy:
+            handlers += [
+                ("limit_scan",    self.cmd_limit_scan),
+                ("limit_status",  self.cmd_limit_status),
+                ("limit_resume",  self.cmd_limit_resume),
+                ("limit_config",  self.cmd_limit_config),
+                ("registry",      self.cmd_registry),
+            ]
+            logger.info("[TelegramBot] 전략C 명령어 등록 완료")
+
+        # ── 성과 리포트 명령어 (v3.1 NEW) ────────────────────
+        if self.tracker:
+            handlers += [
+                ("report_daily",   self.cmd_report_daily),
+                ("report_weekly",  self.cmd_report_weekly),
+                ("report_monthly", self.cmd_report_monthly),
+                ("report_all",     self.cmd_report_all),
+                ("analysis",       self.cmd_analysis),
+            ]
+            logger.info("[TelegramBot] 성과 리포트 명령어 등록 완료")
+
         for cmd, handler in handlers:
             self.app.add_handler(CommandHandler(cmd, handler))
 
@@ -181,6 +225,13 @@ class TelegramBot:
                 f"⚡ 15:10 — 강제 청산 경고\n"
                 f"⚡ 15:20 — 전량 강제 청산\n\n"
             )
+        if self.limit_strategy:
+            msg += (
+                f"<b>[ 전략C 상한가선진입 스케줄 ]</b>\n"
+                f"🎯 09:00~14:30 — 25%+ 종목 스캔 (30초)\n"
+                f"🎯 08:00~09:30 — 익일 갭 매도 감시\n"
+                f"🎯 09:30 — 미청산 전량 강제청산\n\n"
+            )
         msg += (
             f"<b>[ 주요 명령어 ]</b>\n"
             f"▶️ /status    — 종가베팅 포지션\n"
@@ -194,6 +245,12 @@ class TelegramBot:
                 f"⚡ /scalp_scan    — 단타 스캔\n"
                 f"⚡ /scalp_stop    — 단타 ON/OFF\n"
                 f"⚡ /scalp_config  — 단타 설정\n"
+            )
+        if self.limit_strategy:
+            msg += (
+                f"🎯 /limit_scan    — 상한가선진입 스캔\n"
+                f"🎯 /limit_status  — 전략C 포지션\n"
+                f"🎯 /registry      — 3전략 레지스트리\n"
             )
         msg += "▶️ /help — 전체 명령어"
         await update.message.reply_text(msg, parse_mode="HTML")
@@ -241,6 +298,16 @@ class TelegramBot:
                 "  /scalp_watchlist     — 수동 감시 목록\n"
             )
         msg += "\n📱 <b>/guide</b> — 아이폰 최적화 인라인 가이드"
+        if self.limit_strategy:
+            msg += (
+                "\n\n<b>── 전략C 상한가선진입 (v3.0 NEW) ──</b>\n"
+                "  /limit_scan           — 25%+ 종목 즉시 스캔\n"
+                "  /limit_status         — 전략C 포지션 + 익일 매도 현황\n"
+                "  /limit_resume         — 연속손절 후 수동 재개\n"
+                "  /limit_config show    — 전략C 설정 조회\n"
+                "  /limit_config set [키] [값]\n"
+                "  /registry             — 3전략 포지션 레지스트리 현황\n"
+            )
         await update.message.reply_text(msg, parse_mode="HTML")
 
     # ──────────────────────────────────────────────────────────
@@ -267,6 +334,10 @@ class TelegramBot:
                 "hybrid": self._guide_hybrid,
                 "params": self._guide_params, "scalp_params": self._guide_scalp_params,
                 "costs": self._guide_costs, "fib": self._guide_fib,
+                # ── v3.0 NEW ─────────────────────────────────────
+                "limit_info": self._guide_limit_info,
+                "limit_cfg":  self._guide_limit_cfg,
+                "registry":   self._guide_registry,
             }
             fn = guide_map.get(section)
             if fn: await fn(update)
@@ -276,7 +347,7 @@ class TelegramBot:
         text = (
             "📱 <b>명령어 가이드</b>\n"
             "버튼을 탭하면 해당 섹션으로 이동합니다\n\n"
-            "버전: <code>v2.3.0</code>  |  종가베팅 + 단타 + 하이브리드"
+            "버전: <code>v3.0.0</code>  |  종가베팅 + 단타 + 상한가선진입"
         )
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("📊 종가베팅 조회",    callback_data="GUIDE:info"),
@@ -292,6 +363,9 @@ class TelegramBot:
              InlineKeyboardButton("📋 단타 파라미터",    callback_data="GUIDE:scalp_params")],
             [InlineKeyboardButton("💸 거래 비용 안내",   callback_data="GUIDE:costs"),
              InlineKeyboardButton("📡 Fib 재진입 전략",  callback_data="GUIDE:fib")],
+            [InlineKeyboardButton("🎯 전략C 상한가선진입 ★NEW", callback_data="GUIDE:limit_info")],
+            [InlineKeyboardButton("⚙️ 전략C 설정",       callback_data="GUIDE:limit_cfg"),
+             InlineKeyboardButton("🔒 포지션 레지스트리", callback_data="GUIDE:registry")],
         ])
         if update.callback_query:
             await update.callback_query.edit_message_text(
@@ -652,6 +726,101 @@ class TelegramBot:
         )
         await self._guide_reply(update, msg, back="menu",
                                 extra_btn=("⚡ 단타 조회", "GUIDE:scalp_info"))
+
+    # ── v3.0 NEW: 전략C 가이드 ────────────────────────────────
+
+    async def _guide_limit_info(self, update):
+        """전략C 상한가선진입 — 조회·제어 가이드"""
+        msg = (
+            "🎯 <b>[ 전략C — 상한가선진입 ]</b>  ★ v3.0 NEW\n\n"
+            "25%+ 급등 종목에 7대 신호 복합 분석\n"
+            "→ 상한가 도달 전 선진입 / 익일 갭별 매도\n\n"
+
+            "<b>/limit_scan</b>  25%+ 종목 즉시 스캔\n"
+            "  → 7대 신호 점수 + 매수 신호 여부\n"
+            "  → 자동: 09:00~14:30 (30초 주기)\n\n"
+
+            "<b>/limit_status</b>  보유 포지션 현황\n"
+            "  → 매수가 / 현재가 / 손익\n"
+            "  → 익일 매도 대기 갭 기준 표시\n\n"
+
+            "<b>/limit_resume</b>  전략C 수동 재개\n"
+            "  → 연속 손절로 자동 정지 시 사용\n\n"
+
+            "<b>7대 신호 가중치</b>\n"
+            "테마 25% / 뉴스 20% / 수급 20%\n"
+            "거래량 15% / 기술 10% / 소셜 5% / 시장 5%\n\n"
+
+            "<b>익일 갭별 자동 매도</b>\n"
+            "갭 +5%↑  → 동시호가 전량\n"
+            "갭 +2~5% → 동시호가 50% + 장초반 50%\n"
+            "갭 보합  → 09:30 강제청산\n"
+            "갭 -3%↓  → 즉시 손절"
+        )
+        await self._guide_reply(update, msg, back="menu",
+                                extra_btn=("⚙️ 전략C 설정", "GUIDE:limit_cfg"))
+
+    async def _guide_limit_cfg(self, update):
+        """전략C 상한가선진입 — 설정 가이드"""
+        # 실시간 설정값 조회
+        cfg_summary = ""
+        if self.limit_cfg:
+            sig = self.limit_cfg.get_signal()
+            sc  = self.limit_cfg.get_scan()
+            ec  = self.limit_cfg.get_entry()
+            ex  = self.limit_cfg.get_exit()
+            cfg_summary = (
+                f"\n<b>현재 설정값</b>\n"
+                f"점수기준: <code>{sig.get('composite_score_min', 70)}</code>  "
+                f"체결강도: <code>{sig.get('strength_min', 150)}%</code>\n"
+                f"스캔중단: <code>{sc.get('scan_stop_time', '14:30')}</code>  "
+                f"최대보유: <code>{ec.get('max_positions', 2)}</code>종목\n"
+                f"당일손절: <code>{ex.get('stop_loss_pct', -5.0)}%</code>  "
+                f"강제청산: <code>{ex.get('force_sell_time', '09:30')}</code>\n\n"
+            )
+
+        msg = (
+            "⚙️ <b>[ 전략C — /limit_config ]</b>\n"
+            + cfg_summary +
+            "<b>조회</b>\n"
+            "<code>/limit_config show</code>            전체\n"
+            "<code>/limit_config show signal</code>     신호 기준\n"
+            "<code>/limit_config show exit</code>       매도 전략\n\n"
+
+            "<b>자주 쓰는 변경</b>\n"
+            "<code>/limit_config set signal.composite_score_min 75</code>\n"
+            "<code>/limit_config set entry.max_positions 1</code>\n"
+            "<code>/limit_config set exit.stop_loss_pct -4.0</code>\n"
+            "<code>/limit_config set scan.scan_stop_time 13:30</code>\n"
+            "<code>/limit_config set exit.force_sell_time 09:20</code>\n"
+            "<code>/limit_config reset</code>  기본값 초기화\n\n"
+
+            "💡 처음엔 score_min=80, max_positions=1 권장"
+        )
+        await self._guide_reply(update, msg, back="menu",
+                                extra_btn=("🎯 전략C 조회", "GUIDE:limit_info"))
+
+    async def _guide_registry(self, update):
+        """포지션 레지스트리 가이드"""
+        msg = (
+            "🔒 <b>[ 포지션 레지스트리 ]</b>  ★ v3.0 NEW\n\n"
+            "3전략의 중복 매수·자금 경합을 전역으로 방지합니다.\n\n"
+
+            "<b>/registry</b>  현황 조회\n"
+            "  → 전략별 보유 종목 + 자금 사용률\n"
+            "  → 손절 쿨다운 블랙리스트\n\n"
+
+            "<b>충돌 해소 규칙</b>\n"
+            "우선순위: C(3) &gt; A(2) &gt; B(1)\n"
+            "자금 한도: A 25% / B 30% / C 30%\n"
+            "예비 버퍼: 10% (항상 유보)\n\n"
+
+            "<b>손절 쿨다운</b>\n"
+            "손절 후 30분간 전 전략에서\n"
+            "해당 종목 신규 매수 자동 차단"
+        )
+        await self._guide_reply(update, msg, back="menu",
+                                extra_btn=("🎯 전략C 조회", "GUIDE:limit_info"))
 
     async def _guide_reply(self, update, msg: str,
                             back: str = "menu",
@@ -1018,25 +1187,46 @@ class TelegramBot:
         if not is_authorized(update): return
         args         = ctx.args
         show_history = args and args[0].lower() in ("history", "all", "log")
+
+        # CURRENT_FEATURES: 리스트인 경우 HTML 문자열로 변환
+        if isinstance(CURRENT_FEATURES, list):
+            features_text = (
+                f"<b>[ 키움 자동매매봇 v{CURRENT_VERSION} ]</b>\n\n"
+                "<b>주요 기능</b>\n" +
+                "\n".join(f"  • {f}" for f in CURRENT_FEATURES)
+            )
+        else:
+            features_text = CURRENT_FEATURES
+
         if not show_history:
-            await update.message.reply_text(CURRENT_FEATURES, parse_mode="HTML")
-            recent = VERSION_HISTORY[-5:]
+            await update.message.reply_text(features_text, parse_mode="HTML")
+            # VERSION_HISTORY: 딕셔너리 리스트 또는 문자열 리스트 모두 처리
+            recent = VERSION_HISTORY[:5]
             lines  = ["<b>[ 최근 변경 이력 ]</b>\n"]
-            for item in reversed(recent):
-                lines.append(f"• {item}\n")
+            for item in recent:
+                if isinstance(item, dict):
+                    icon = {"major": "🔴", "minor": "🟡", "patch": "🟢"}.get(item.get("type",""), "⚪")
+                    lines.append(f"{icon} <b>v{item['version']}</b> ({item['date']}) — {item['summary']}\n")
+                else:
+                    lines.append(f"• {item}\n")
             lines.append(f"\n<i>전체 이력: /version history</i>")
             await update.message.reply_text("\n".join(lines), parse_mode="HTML")
             return
+
         await update.message.reply_text(
             f"📋 <b>[ 전체 이력 — {CURRENT_VERSION} ]</b>  총 {len(VERSION_HISTORY)}개",
             parse_mode="HTML"
         )
-        history_rev = list(reversed(VERSION_HISTORY))
-        for i in range(0, len(history_rev), 5):
-            chunk = history_rev[i:i+5]
-            await update.message.reply_text(
-                "\n".join(f"• {item}\n" for item in chunk), parse_mode="HTML"
-            )
+        for i in range(0, len(VERSION_HISTORY), 5):
+            chunk = VERSION_HISTORY[i:i+5]
+            lines = []
+            for item in chunk:
+                if isinstance(item, dict):
+                    icon = {"major": "🔴", "minor": "🟡", "patch": "🟢"}.get(item.get("type",""), "⚪")
+                    lines.append(f"{icon} <b>v{item['version']}</b> ({item['date']})\n  {item['summary']}\n")
+                else:
+                    lines.append(f"• {item}\n")
+            await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
     # ──────────────────────────────────────────────────────────
     # 단타 명령어
@@ -1676,6 +1866,10 @@ class TelegramBot:
                 "scalp_params": self._guide_scalp_params,
                 "costs":        self._guide_costs,
                 "fib":          self._guide_fib,
+                # ── v3.0 NEW ─────────────────────────────────────
+                "limit_info":   self._guide_limit_info,
+                "limit_cfg":    self._guide_limit_cfg,
+                "registry":     self._guide_registry,
             }
             fn = guide_map.get(section, self._guide_menu)
             await fn(update)   # ← 여기서 반드시 return (다음 블록 실행 방지)
@@ -1908,3 +2102,231 @@ class TelegramBot:
     async def notify_error(self, msg: str) -> None:
         """오류 알림"""
         await self.send(f"⚠️ <b>오류 발생</b>\n{msg}")
+
+    # ──────────────────────────────────────────────────────────
+    # 전략C — 상한가선진입 명령어  v3.0 NEW
+    # ──────────────────────────────────────────────────────────
+
+    async def cmd_limit_scan(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """/limit_scan — 25%+ 종목 즉시 스캔"""
+        if not is_authorized(update): return
+        if not self.limit_scanner:
+            await update.message.reply_text("⚠️ 전략C가 초기화되지 않았습니다.")
+            return
+        await update.message.reply_text("🔄 전략C 스캔 중... (10~20초)")
+        try:
+            held = self.limit_strategy.held_codes() if self.limit_strategy else set()
+            candidates = await asyncio.to_thread(
+                self.limit_scanner.scan, held, set()
+            )
+            if not candidates:
+                await update.message.reply_text("📡 <b>[ 전략C 스캔 ]</b>\n조건 충족 종목 없음", parse_mode="HTML")
+                return
+            lines = [f"📡 <b>[ 전략C 스캔 — {len(candidates)}개 ]</b>\n"]
+            for c in candidates[:5]:
+                dec = "★매수신호" if c.get("score", 0) >= 70 else "관찰중"
+                lines.append(
+                    f"{'🔴' if dec=='★매수신호' else '🟡'} <b>{c['name']}({c['code']})</b>  "
+                    f"점수: <b>{c.get('score', 0):.0f}</b>  {dec}\n"
+                    f"   등락: +{c.get('change_pct', 0):.1f}%  "
+                    f"거래량배수: {c.get('vol_ratio', 0):.1f}배  "
+                    f"체결강도: {c.get('strength', 0):.0f}%"
+                )
+            await update.message.reply_html("\n".join(lines))
+        except Exception as e:
+            await update.message.reply_text(f"❌ 스캔 실패: {e}")
+
+    async def cmd_limit_status(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """/limit_status — 전략C 보유 포지션 현황"""
+        if not is_authorized(update): return
+        if not self.limit_strategy:
+            await update.message.reply_text("⚠️ 전략C가 초기화되지 않았습니다.")
+            return
+        positions = self.limit_strategy.get_positions()
+        now = datetime.now().strftime("%Y-%m-%d %H:%M")
+        if not positions:
+            await update.message.reply_html(
+                f"<b>[ 전략C 포지션 ]</b>  <i>{now}</i>\n\n보유 없음"
+            )
+            return
+        lines = [f"<b>[ 전략C 포지션 ]</b>  <i>{now}</i>\n"]
+        try:
+            ex_cfg = self.limit_cfg.get_exit() if self.limit_cfg else {}
+            for pos in positions:
+                info = self.broker.get_stock_info(pos.code)
+                cur  = info["cur_price"] if info else pos.buy_price
+                pct  = pos.profit_pct(cur)
+                icon = "🔺" if pct >= 0 else "🔻"
+                stop = int(pos.buy_price * (1 + ex_cfg.get("stop_loss_pct", -5) / 100))
+                tgt  = int(pos.buy_price * (1 + ex_cfg.get("take_profit_pct", 5) / 100))
+                lines.append(
+                    f"{icon} <b>{pos.name}({pos.code})</b>\n"
+                    f"   매수가: {pos.buy_price:,}원  수량: {pos.qty}주\n"
+                    f"   현재가: <b>{cur:,}원  {pct:+.1f}%</b>\n"
+                    f"   점수: {pos.score:.0f}점  테마: {pos.theme or '미분류'}\n"
+                    f"   손절: {stop:,}  |  목표: {tgt:,}\n"
+                    f"   ★ 익일 매도 대기"
+                )
+        except Exception as e:
+            lines.append(f"조회 중 오류: {e}")
+        await update.message.reply_html("\n".join(lines))
+
+    async def cmd_limit_resume(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """/limit_resume — 전략C 연속손절 후 수동 재개"""
+        if not is_authorized(update): return
+        if not self.limit_strategy:
+            await update.message.reply_text("⚠️ 전략C가 초기화되지 않았습니다.")
+            return
+        self.limit_strategy.resume()
+        await update.message.reply_html("✅ <b>전략C 재개</b>\n신규 진입 스캔을 재시작합니다.")
+
+    async def cmd_limit_config(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """/limit_config show [섹션] | set [키] [값] | reset"""
+        if not is_authorized(update): return
+        if not self.limit_cfg:
+            await update.message.reply_text("⚠️ 전략C 설정이 초기화되지 않았습니다.")
+            return
+        args = ctx.args
+        if not args or args[0].lower() == "show":
+            section = args[1].lower() if len(args) > 1 else None
+            await update.message.reply_html(self.limit_cfg.show(section))
+        elif args[0].lower() == "set" and len(args) >= 3:
+            key, val = args[1], args[2]
+            result = self.limit_cfg.set(key, val)
+            await update.message.reply_html(result)
+        elif args[0].lower() == "reset":
+            result = self.limit_cfg.reset()
+            await update.message.reply_html(result)
+        else:
+            await update.message.reply_text(
+                "사용법:\n/limit_config show [섹션]\n/limit_config set [키] [값]\n/limit_config reset"
+            )
+
+    async def cmd_registry(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """/registry — 3전략 포지션 레지스트리 현황"""
+        if not is_authorized(update): return
+        if not self.registry:
+            await update.message.reply_text("⚠️ 레지스트리가 초기화되지 않았습니다.")
+            return
+        await update.message.reply_html(self.registry.summary())
+
+    async def notify_limit_buy(self, code: str, name: str, qty: int,
+                                price: int, candidate: dict) -> None:
+        """전략C 자동 매수 알림"""
+        import pytz
+        KST     = pytz.timezone("Asia/Seoul")
+        now_str = datetime.now(KST).strftime("%H:%M:%S")
+        score   = candidate.get("score", 0)
+        theme   = candidate.get("theme", "미분류")
+        pct     = candidate.get("change_pct", 0)
+        ex_cfg  = self.limit_cfg.get_exit() if self.limit_cfg else {}
+        stop    = int(price * (1 + ex_cfg.get("stop_loss_pct", -5) / 100))
+        tgt     = int(price * (1 + ex_cfg.get("take_profit_pct", 5) / 100))
+        await self.send(
+            f"🎯 <b>[전략C 매수]</b>  {now_str}\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"📌 종목: <b>{name} ({code})</b>\n"
+            f"🏷 테마: {theme}  |  등락: <b>+{pct:.1f}%</b>\n"
+            f"💯 종합점수: <b>{score:.0f}점</b>\n"
+            f"💰 체결가: <b>{price:,}원</b>  {qty}주\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"🛑 손절: {stop:,}원  |  🎯 목표: {tgt:,}원\n"
+            f"★ 익일 갭 구간별 자동 매도 대기"
+        )
+
+    async def notify_limit_sell(self, code: str, name: str, qty: int,
+                                 sell_price: int, buy_price: int,
+                                 reason: str = "") -> None:
+        """전략C 자동 매도 알림"""
+        import pytz
+        KST      = pytz.timezone("Asia/Seoul")
+        now_str  = datetime.now(KST).strftime("%H:%M:%S")
+        pnl      = (sell_price - buy_price) * qty
+        pnl_pct  = (sell_price - buy_price) / buy_price * 100 if buy_price > 0 else 0
+        icon     = "✅" if pnl >= 0 else "❌"
+        result   = "익절" if pnl > 0 else ("손절" if pnl < 0 else "본절")
+        await self.send(
+            f"{icon} <b>[전략C {result}]</b>  {now_str}\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"📌 종목: <b>{name} ({code})</b>\n"
+            f"💸 매도가: <b>{sell_price:,}원</b>  ({qty}주)\n"
+            f"📈 {buy_price:,}원 → {sell_price:,}원\n"
+            f"💵 실손익: <b>{pnl:+,}원 ({pnl_pct:+.1f}%)</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"사유: {reason}"
+        )
+
+    # ──────────────────────────────────────────────────────────
+    # 성과 리포트 명령어  v3.1 NEW
+    # ──────────────────────────────────────────────────────────
+
+    async def cmd_report_daily(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """/report_daily [YYYYMMDD] — 일별 성과 리포트"""
+        if not is_authorized(update): return
+        if not self.tracker:
+            await update.message.reply_text("⚠️ 성과 추적기가 초기화되지 않았습니다.")
+            return
+        args = ctx.args
+        if args:
+            try:
+                d = datetime.strptime(args[0], "%Y%m%d")
+                d = KST.localize(d)
+            except ValueError:
+                await update.message.reply_text("날짜 형식: YYYYMMDD (예: 20260518)")
+                return
+        else:
+            d = datetime.now(KST)
+        report = self.tracker.daily_report(d)
+        await update.message.reply_html(report)
+
+    async def cmd_report_weekly(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """/report_weekly — 주별 성과 리포트"""
+        if not is_authorized(update): return
+        if not self.tracker:
+            await update.message.reply_text("⚠️ 성과 추적기가 초기화되지 않았습니다.")
+            return
+        report = self.tracker.weekly_report(datetime.now(KST))
+        await update.message.reply_html(report)
+
+    async def cmd_report_monthly(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """/report_monthly — 월별 성과 리포트"""
+        if not is_authorized(update): return
+        if not self.tracker:
+            await update.message.reply_text("⚠️ 성과 추적기가 초기화되지 않았습니다.")
+            return
+        report = self.tracker.monthly_report(datetime.now(KST))
+        await update.message.reply_html(report)
+
+    async def cmd_report_all(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """/report_all — 일/주/월 성과 한번에 조회"""
+        if not is_authorized(update): return
+        if not self.tracker:
+            await update.message.reply_text("⚠️ 성과 추적기가 초기화되지 않았습니다.")
+            return
+        now = datetime.now(KST)
+        await update.message.reply_html(self.tracker.daily_report(now))
+        await update.message.reply_html(self.tracker.weekly_report(now))
+        await update.message.reply_html(self.tracker.monthly_report(now))
+
+    async def cmd_analysis(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """/analysis [7|30|90] [A|B|C] — 알고리즘 개선 분석"""
+        if not is_authorized(update): return
+        if not self.tracker:
+            await update.message.reply_text("⚠️ 성과 추적기가 초기화되지 않았습니다.")
+            return
+        args     = ctx.args
+        days     = 30
+        strategy = None
+        for a in (args or []):
+            if a.isdigit():
+                days = int(a)
+            elif a.upper() in ("A", "B", "C"):
+                strategy = a.upper()
+        await update.message.reply_text(
+            f"🔬 최근 {days}일 분석 중..."
+            + (f" (전략{strategy})" if strategy else "")
+        )
+        analysis = self.tracker.improvement_hints(days=days, strategy=strategy)
+        # 4096자 제한 분할 전송
+        for i in range(0, len(analysis), 4000):
+            await update.message.reply_html(analysis[i:i+4000])
