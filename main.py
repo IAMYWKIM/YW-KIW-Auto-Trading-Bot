@@ -475,7 +475,7 @@ async def job_scalp_loop():
         # ── Fib 재진입 신호 체크 (30초마다) ─────────────────────
         fib_signals = await asyncio.to_thread(
             fib_mgr.check_all, broker,
-            scalp_cfg.get("scan.fib_min_wait_min", 10) if hasattr(scalp_cfg, 'get') else 10,
+            10,   # 손절 후 최소 대기 시간 (분) — fib_min_wait_min 기본값
         )
         for fib_candidate in fib_signals:
             if len(scalp_strategy.held_codes()) >= effective_max:

@@ -264,6 +264,7 @@ class TelegramBot:
                 "order": self._guide_swing_order, "config": self._guide_swing_config,
                 "scalp_info": self._guide_scalp_info, "scalp_ctrl": self._guide_scalp_ctrl,
                 "scalp_sum": self._guide_scalp_sum, "scalp_cfg": self._guide_scalp_cfg,
+                "hybrid": self._guide_hybrid,
                 "params": self._guide_params, "scalp_params": self._guide_scalp_params,
                 "costs": self._guide_costs, "fib": self._guide_fib,
             }
@@ -275,7 +276,7 @@ class TelegramBot:
         text = (
             "📱 <b>명령어 가이드</b>\n"
             "버튼을 탭하면 해당 섹션으로 이동합니다\n\n"
-            "버전: <code>v2.1.0</code>  |  종가베팅 + 단타 통합"
+            "버전: <code>v2.3.0</code>  |  종가베팅 + 단타 + 하이브리드"
         )
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("📊 종가베팅 조회",    callback_data="GUIDE:info"),
@@ -286,13 +287,12 @@ class TelegramBot:
              InlineKeyboardButton("🎛️ 단타 제어",        callback_data="GUIDE:scalp_ctrl")],
             [InlineKeyboardButton("📈 매매 요약",        callback_data="GUIDE:scalp_sum"),
              InlineKeyboardButton("🔧 단타 설정",        callback_data="GUIDE:scalp_cfg")],
+            [InlineKeyboardButton("🎯 하이브리드 모드 — 수동 주도주 지정", callback_data="GUIDE:hybrid")],
             [InlineKeyboardButton("📋 종가베팅 파라미터",callback_data="GUIDE:params"),
              InlineKeyboardButton("📋 단타 파라미터",    callback_data="GUIDE:scalp_params")],
             [InlineKeyboardButton("💸 거래 비용 안내",   callback_data="GUIDE:costs"),
              InlineKeyboardButton("📡 Fib 재진입 전략",  callback_data="GUIDE:fib")],
         ])
-        # 명령어로 호출 시 → 새 메시지 전송
-        # 콜백 버튼으로 호출 시 → 기존 메시지 수정
         if update.callback_query:
             await update.callback_query.edit_message_text(
                 text, parse_mode="HTML", reply_markup=keyboard
@@ -419,9 +419,29 @@ class TelegramBot:
         await self._guide_reply(update, msg, back="menu")
 
     async def _guide_scalp_cfg(self, update):
+        # 현재 설정값 실시간 조회
+        if self.scalp_cfg:
+            sc  = self.scalp_cfg.get_scan()
+            ec  = self.scalp_cfg.get_entry()
+            ex  = self.scalp_cfg.get_exit()
+            cfg_summary = (
+                f"\n<b>현재 설정값</b>\n"
+                f"진입 마감:  <code>{sc.get('entry_end_time','14:30')}</code>\n"
+                f"손절선:     <b><code>{ex.get('stop_loss_pct','-1.5')}</code></b>\n"
+                f"익절선:     <b><code>{ex.get('take_profit_pct','2.5')}</code></b>\n"
+                f"트레일링:   <code>{ex.get('trailing_gap_pct','1.0')}%</code>  "
+                f"활성화: <code>{ex.get('trailing_activate_pct','1.0')}%</code>\n"
+                f"최대 포지션: <code>{ec.get('max_positions',3)}</code>  "
+                f"투자비율: <code>{ec.get('position_size_pct',20)}%</code>\n"
+                f"VWAP 필터: <code>{ec.get('use_vwap_filter',True)}</code>\n"
+            )
+        else:
+            cfg_summary = ""
+
         msg = (
-            "🔧 <b>[ 단타 — /scalp_config ]</b>\n\n"
-            "<b>조회</b>\n"
+            "🔧 <b>[ 단타 — /scalp_config ]</b>\n"
+            + cfg_summary +
+            "\n<b>조회</b>\n"
             "<code>/scalp_config show</code>        전체\n"
             "<code>/scalp_config show exit</code>   청산 조건\n"
             "<code>/scalp_config show risk</code>   리스크\n\n"
@@ -437,68 +457,120 @@ class TelegramBot:
                                 extra_btn=("📋 단타 파라미터", "GUIDE:scalp_params"))
 
     async def _guide_params(self, update):
-        msg = (
-            "📋 <b>[ 종가베팅 파라미터 ]</b>\n"
-            "<i>/config set [키] [값]</i>\n\n"
-            "<b>SCAN</b>\n"
-            "<code>scan.min_trading_value</code>   <i>10000000000</i>\n"
-            "<code>scan.surge_threshold_e</code>   <i>9.0</i>\n"
-            "<code>scan.envelope_period</code>     <i>20</i>\n"
-            "<code>scan.envelope_band_pct</code>   <i>20.0</i>\n"
-            "<code>scan.volume_ratio_min</code>    <i>1.5</i>\n\n"
-            "<b>ENTRY</b>\n"
-            "<code>entry.pullback_min_pct</code>   <i>-10.0</i>\n"
-            "<code>entry.pullback_max_pct</code>   <i>-0.5</i>\n"
-            "<code>entry.entry_start_time</code>   <i>15:10</i>\n"
-            "<code>entry.max_positions</code>      <i>3</i>\n"
-            "<code>entry.position_size_pct</code>  <i>15</i>\n"
-            "<code>entry.rsi_min</code>            <i>30</i>\n"
-            "<code>entry.rsi_max</code>            <i>80</i>\n\n"
-            "<b>RISK</b>\n"
-            "<code>risk.stop_loss_pct</code>       <i>-3.0</i>\n"
-            "<code>risk.take_profit_pct</code>     <i>5.0</i>\n"
-            "<code>risk.trailing_gap_pct</code>    <i>2.0</i>\n"
-            "<code>risk.force_sell_time</code>     <i>15:00</i>\n\n"
-            "<b>SELL</b>\n"
-            "<code>sell.nxt_gap_target_pct</code>  <i>2.0</i>\n"
-            "<code>sell.morning_target_pct</code>  <i>3.0</i>"
-        )
+        # scfg에서 실시간 값 조회
+        if self.scfg:
+            sc = self.scfg.get_scan()
+            ec = self.scfg.get_entry()
+            rk = self.scfg.get_risk()
+            sl = self.scfg.get_sell()
+
+            def v(val, default=""):
+                return str(val) if val is not None else str(default)
+
+            msg = (
+                "📋 <b>[ 종가베팅 현재 설정값 ]</b>\n"
+                "<i>/config set [키] [값]으로 변경</i>\n\n"
+
+                "<b>── SCAN ──</b>\n"
+                f"<code>scan.min_trading_value</code>   <b>{v(sc.get('min_trading_value'))}</b>\n"
+                f"<code>scan.surge_threshold_e</code>   <b>{v(sc.get('surge_threshold_e'))}</b>\n"
+                f"<code>scan.envelope_period</code>     <b>{v(sc.get('envelope_period'))}</b>\n"
+                f"<code>scan.envelope_band_pct</code>   <b>{v(sc.get('envelope_band_pct'))}</b>\n"
+                f"<code>scan.volume_ratio_min</code>    <b>{v(sc.get('volume_ratio_min'))}</b>\n\n"
+
+                "<b>── ENTRY ──</b>\n"
+                f"<code>entry.pullback_min_pct</code>   <b>{v(ec.get('pullback_min_pct'))}</b>\n"
+                f"<code>entry.pullback_max_pct</code>   <b>{v(ec.get('pullback_max_pct'))}</b>\n"
+                f"<code>entry.entry_start_time</code>   <b>{v(ec.get('entry_start_time'))}</b>\n"
+                f"<code>entry.max_positions</code>      <b>{v(ec.get('max_positions'))}</b>\n"
+                f"<code>entry.position_size_pct</code>  <b>{v(ec.get('position_size_pct'))}</b>\n"
+                f"<code>entry.rsi_min/rsi_max</code>    <b>{v(ec.get('rsi_min'))} / {v(ec.get('rsi_max'))}</b>\n\n"
+
+                "<b>── RISK ──</b>\n"
+                f"<code>risk.stop_loss_pct</code>       <b>{v(rk.get('stop_loss_pct'))}</b>\n"
+                f"<code>risk.take_profit_pct</code>     <b>{v(rk.get('take_profit_pct'))}</b>\n"
+                f"<code>risk.trailing_gap_pct</code>    <b>{v(rk.get('trailing_gap_pct'))}</b>\n"
+                f"<code>risk.force_sell_time</code>     <b>{v(rk.get('force_sell_time'))}</b>\n\n"
+
+                "<b>── SELL ──</b>\n"
+                f"<code>sell.nxt_gap_target_pct</code>  <b>{v(sl.get('nxt_gap_target_pct'))}</b>\n"
+                f"<code>sell.morning_target_pct</code>  <b>{v(sl.get('morning_target_pct'))}</b>"
+            )
+        else:
+            msg = "⚠️ 종가베팅 설정이 초기화되지 않았습니다."
+
         await self._guide_reply(update, msg, back="menu")
 
     async def _guide_scalp_params(self, update):
-        msg = (
-            "📋 <b>[ 단타 파라미터 ]</b>\n"
-            "<i>/scalp_config set [키] [값]</i>\n\n"
-            "<b>SCAN</b>\n"
-            "<code>scan.min_rise_pct</code>         <i>3.0</i>\n"
-            "<code>scan.max_rise_pct</code>          <i>20.0</i>\n"
-            "<code>scan.min_trading_value</code>     <i>5000000000</i>\n"
-            "<code>scan.volume_ratio_min</code>      <i>3.0</i>\n"
-            "<code>scan.entry_end_time</code>        <i>14:30</i>\n"
-            "<code>scan.api_delay_sec</code>         <i>0.5</i>\n\n"
-            "<b>ENTRY</b>\n"
-            "<code>entry.max_positions</code>        <i>3</i>\n"
-            "<code>entry.position_size_pct</code>    <i>20</i>\n"
-            "<code>entry.use_vwap_filter</code>      <i>true</i>\n"
-            "<code>entry.cooldown_sec</code>         <i>300</i>\n\n"
-            "<b>EXIT</b>\n"
-            "<code>exit.take_profit_pct</code>       <i>2.5</i>  → 실질+2.29%\n"
-            "<code>exit.stop_loss_pct</code>         <i>-1.5</i> → 실질-1.71%\n"
-            "<code>exit.partial_profit_pct</code>    <i>1.5</i>\n"
-            "<code>exit.trailing_stop</code>         <i>true</i>\n"
-            "<code>exit.trailing_gap_pct</code>      <i>1.0</i>\n"
-            "<code>exit.trailing_activate_pct</code> <i>1.0</i>\n"
-            "<code>exit.force_exit_time</code>       <i>15:20</i>\n"
-            "<code>exit.time_stop_minutes</code>     <i>60</i>\n\n"
-            "<b>RISK</b>\n"
-            "<code>risk.daily_loss_limit_pct</code>  <i>-3.0</i>\n"
-            "<code>risk.max_consecutive_loss</code>  <i>3</i>\n"
-            "<code>risk.reserve_cash_pct</code>      <i>10</i>"
-        )
+        # scalp_cfg에서 실시간 값 조회
+        if self.scalp_cfg:
+            sc  = self.scalp_cfg.get_scan()
+            ec  = self.scalp_cfg.get_entry()
+            ex  = self.scalp_cfg.get_exit()
+            rk  = self.scalp_cfg.get_risk()
+
+            def v(val, default=""):
+                """값을 표시용 문자열로 변환, 변경된 경우 ★ 표시"""
+                return str(val) if val is not None else str(default)
+
+            # 실질 손익 계산 (수수료 0.21% 반영)
+            tp = float(ex.get('take_profit_pct', 2.5))
+            sl = float(ex.get('stop_loss_pct', -1.5))
+            tp_real = round(tp - 0.21, 2)
+            sl_real = round(sl - 0.21, 2)
+
+            msg = (
+                "📋 <b>[ 단타 현재 설정값 ]</b>\n"
+                "<i>/scalp_config set [키] [값]으로 변경</i>\n\n"
+
+                "<b>── SCAN ──</b>\n"
+                f"<code>scan.min_rise_pct</code>         <b>{v(sc.get('min_rise_pct'))}</b>\n"
+                f"<code>scan.max_rise_pct</code>          <b>{v(sc.get('max_rise_pct'))}</b>\n"
+                f"<code>scan.min_trading_value</code>     <b>{v(sc.get('min_trading_value'))}</b>\n"
+                f"<code>scan.volume_ratio_min</code>      <b>{v(sc.get('volume_ratio_min'))}</b>\n"
+                f"<code>scan.entry_end_time</code>        <b>{v(sc.get('entry_end_time'))}</b>\n"
+                f"<code>scan.api_delay_sec</code>         <b>{v(sc.get('api_delay_sec'))}</b>\n\n"
+
+                "<b>── ENTRY ──</b>\n"
+                f"<code>entry.max_positions</code>        <b>{v(ec.get('max_positions'))}</b>\n"
+                f"<code>entry.position_size_pct</code>    <b>{v(ec.get('position_size_pct'))}</b>\n"
+                f"<code>entry.use_vwap_filter</code>      <b>{v(ec.get('use_vwap_filter'))}</b>\n"
+                f"<code>entry.cooldown_sec</code>         <b>{v(ec.get('cooldown_sec'))}</b>\n\n"
+
+                "<b>── EXIT ──</b>\n"
+                f"<code>exit.take_profit_pct</code>       <b>{tp}</b>  실질 <b>+{tp_real}%</b>\n"
+                f"<code>exit.stop_loss_pct</code>         <b>{sl}</b>  실질 <b>{sl_real}%</b>\n"
+                f"<code>exit.partial_profit_pct</code>    <b>{v(ex.get('partial_profit_pct'))}</b>\n"
+                f"<code>exit.trailing_stop</code>         <b>{v(ex.get('trailing_stop'))}</b>\n"
+                f"<code>exit.trailing_gap_pct</code>      <b>{v(ex.get('trailing_gap_pct'))}</b>\n"
+                f"<code>exit.trailing_activate_pct</code> <b>{v(ex.get('trailing_activate_pct'))}</b>\n"
+                f"<code>exit.force_exit_time</code>       <b>{v(ex.get('force_exit_time'))}</b>\n"
+                f"<code>exit.time_stop_minutes</code>     <b>{v(ex.get('time_stop_minutes'))}</b>\n\n"
+
+                "<b>── RISK ──</b>\n"
+                f"<code>risk.daily_loss_limit_pct</code>  <b>{v(rk.get('daily_loss_limit_pct'))}</b>\n"
+                f"<code>risk.max_consecutive_loss</code>  <b>{v(rk.get('max_consecutive_loss'))}</b>\n"
+                f"<code>risk.reserve_cash_pct</code>      <b>{v(rk.get('reserve_cash_pct'))}</b>"
+            )
+        else:
+            msg = "⚠️ 단타 설정이 초기화되지 않았습니다."
+
         await self._guide_reply(update, msg, back="menu",
                                 extra_btn=("💸 거래 비용", "GUIDE:costs"))
 
     async def _guide_costs(self, update):
+        # 현재 설정값 기반 실질 손익 계산
+        if self.scalp_cfg:
+            ex  = self.scalp_cfg.get_exit()
+            tp  = float(ex.get('take_profit_pct', 2.5))
+            sl  = float(ex.get('stop_loss_pct', -1.5))
+        else:
+            tp, sl = 2.5, -1.5
+
+        cost    = 0.21
+        tp_real = round(tp - cost, 2)
+        sl_real = round(sl - cost, 2)
+
         msg = (
             "💸 <b>[ 거래 비용 안내 ]</b>\n\n"
             "수수료 (매수):  <code>+0.015%</code>\n"
@@ -506,10 +578,10 @@ class TelegramBot:
             "거래세 (매도):  <code>+0.180%</code>\n"
             "━━━━━━━━━━━━━━━━\n"
             "Round-trip 합계: <b>~0.21%</b>\n\n"
-            "<b>실질 손절/익절</b>\n"
-            "손절 <code>-1.5%</code> → 실질 <b>-1.71%</b>\n"
-            "익절 <code>+2.5%</code> → 실질 <b>+2.29%</b>\n"
-            "손익비: 2.29 ÷ 1.71 ≈ <b>1.34</b>\n\n"
+            f"<b>현재 설정 기준 실질 손절/익절</b>\n"
+            f"손절 <code>{sl}%</code> → 실질 <b>{sl_real}%</b>\n"
+            f"익절 <code>+{tp}%</code> → 실질 <b>+{tp_real}%</b>\n"
+            f"손익비: {tp_real} ÷ {abs(sl_real)} ≈ <b>{round(tp_real/abs(sl_real),2)}</b>\n\n"
             "매도 알림:\n"
             "총손익 / 수수료+세금 / <b>실손익</b>\n"
             "3가지 분리 표시\n\n"
@@ -535,6 +607,48 @@ class TelegramBot:
             "  저점 대비 <b>+0.3% 반등</b> 확인\n"
             "  현재가 &lt; 손절가\n\n"
             "<b>/scalp_fib</b> — 감시 현황 조회"
+        )
+        await self._guide_reply(update, msg, back="menu",
+                                extra_btn=("⚡ 단타 조회", "GUIDE:scalp_info"))
+
+    async def _guide_hybrid(self, update):
+        """🆕 하이브리드 모드 — 수동 주도주 지정"""
+        msg = (
+            "🎯 <b>[ 하이브리드 모드 — 수동 주도주 지정 ]</b>\n\n"
+            "유저가 직접 주도주를 지정하면\n"
+            "스캐너 필터를 우회하고 동일한 단타 로직으로\n"
+            "자동 매매합니다.\n\n"
+
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "<b>/scalp_add</b> <code>종목코드</code> <code>[종목명]</code>\n"
+            "주도주 수동 감시 추가\n"
+            "  → 이름 미입력 시 자동 조회\n"
+            "  → 30초 후 자동 매수 시도 시작\n"
+            "  예) <code>/scalp_add 247540</code>\n"
+            "  예) <code>/scalp_add 005930 삼성전자</code>\n\n"
+
+            "<b>/scalp_remove</b> <code>종목코드</code>\n"
+            "수동 감시 중단\n"
+            "  → 신규 진입만 중단\n"
+            "  → 보유 포지션은 기존 청산 로직 유지\n"
+            "  예) <code>/scalp_remove 247540</code>\n\n"
+
+            "<b>/scalp_watchlist</b>\n"
+            "수동 감시 목록 조회\n"
+            "  → 활성/중단 목록\n"
+            "  → 실시간 현재가 + 등락률\n"
+            "  → 보유 중인 종목 📌 표시\n\n"
+
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "<b>스캐너 vs 하이브리드 비교</b>\n"
+            "스캐너: 상승률·거래대금·거래량 필터 적용\n"
+            "하이브리드: 위 필터 <b>우회</b> (사람이 판단)\n\n"
+            "공통 적용:\n"
+            "  포지션 수 / 현금 / 마감 시각 / 쿨다운\n"
+            "  손절·익절·트레일링·강제청산 동일\n\n"
+
+            "💾 감시 목록은 JSON 영속화\n"
+            "→ 봇 재시작 후에도 목록 유지"
         )
         await self._guide_reply(update, msg, back="menu",
                                 extra_btn=("⚡ 단타 조회", "GUIDE:scalp_info"))
@@ -965,30 +1079,89 @@ class TelegramBot:
         if not self.scalp_cfg:
             await update.message.reply_text("⚠️ 단타 설정이 초기화되지 않았습니다.")
             return
+
         args = ctx.args or []
+
+        # ── show ──────────────────────────────────────────────
         if not args or args[0] == "show":
             group = args[1] if len(args) > 1 else "all"
-            await update.message.reply_html(self.scalp_cfg.format_for_telegram(group))
-        elif args[0] == "set" and len(args) == 3:
-            try:
-                self.scalp_cfg.set(args[1], args[2])
+            await update.message.reply_html(
+                self.scalp_cfg.format_for_telegram(group)
+            )
+
+        # ── set ───────────────────────────────────────────────
+        elif args[0] == "set":
+            if len(args) < 3:
                 await update.message.reply_text(
-                    f"✅ 단타 설정 변경\n<code>{args[1]}</code> = <b>{args[2]}</b>",
-                    parse_mode="HTML"
+                    "❌ 사용법: /scalp_config set [키] [값]\n"
+                    "예) /scalp_config set exit.stop_loss_pct -2.0"
                 )
+                return
+
+            key   = args[1]
+            value = " ".join(args[2:])   # 값에 공백 포함 가능
+
+            try:
+                ok, detail = self.scalp_cfg.set(key, value)
+                if ok:
+                    # 설정 변경 성공 — 실제 저장된 값을 재확인하여 표시
+                    try:
+                        saved = self.scalp_cfg.get(key)
+                    except Exception:
+                        saved = value
+                    await update.message.reply_html(
+                        f"✅ <b>단타 설정 변경 완료</b>\n\n"
+                        f"<code>{key}</code>\n"
+                        f"변경: <b>{detail}</b>\n"
+                        f"확인: <b>{saved}</b> (파일 재확인)"
+                    )
+                else:
+                    await update.message.reply_html(
+                        f"❌ <b>설정 저장 실패</b>\n\n"
+                        f"<code>{key}</code>\n"
+                        f"사유: {detail}\n\n"
+                        f"서버 로그를 확인하세요."
+                    )
+
             except KeyError as e:
-                await update.message.reply_text(f"❌ {e}")
+                # 키가 존재하지 않음 — 유효한 키 목록 안내
+                await update.message.reply_html(
+                    f"❌ <b>키 없음</b>: {e}\n\n"
+                    f"유효한 키 확인: /scalp_config show\n"
+                    f"키 목록 전체: /scalp_config help"
+                )
+            except ValueError as e:
+                # 값 타입 오류
+                await update.message.reply_html(
+                    f"❌ <b>값 오류</b>: {e}\n\n"
+                    f"현재 타입에 맞는 값을 입력하세요."
+                )
+            except Exception as e:
+                logger.error(f"[TelegramBot] scalp_config set 오류: {e}")
+                await update.message.reply_html(
+                    f"❌ <b>예상치 못한 오류</b>: {e}"
+                )
+
+        # ── reset ─────────────────────────────────────────────
         elif args[0] == "reset":
-            self.scalp_cfg.reset_to_defaults()
-            await update.message.reply_text("✅ 단타 설정 기본값으로 초기화")
+            if self.scalp_cfg.reset_to_defaults():
+                await update.message.reply_text("✅ 단타 설정 기본값으로 초기화")
+            else:
+                await update.message.reply_text("❌ 초기화 실패 — 서버 로그 확인")
+
+        # ── help ──────────────────────────────────────────────
         elif args[0] == "help":
             await update.message.reply_html(self.scalp_cfg.format_help())
+
         else:
-            await update.message.reply_text(
-                "/scalp_config show\n"
-                "/scalp_config set [키] [값]\n"
-                "/scalp_config reset\n"
-                "/scalp_config help"
+            await update.message.reply_html(
+                "📋 <b>/scalp_config 사용법</b>\n\n"
+                "<code>/scalp_config show</code>        전체 설정\n"
+                "<code>/scalp_config show exit</code>   청산 조건만\n"
+                "<code>/scalp_config set [키] [값]</code> 변경\n"
+                "<code>/scalp_config reset</code>       기본값 초기화\n"
+                "<code>/scalp_config help</code>        키 목록\n\n"
+                "예) <code>/scalp_config set exit.stop_loss_pct -2.0</code>"
             )
 
     async def cmd_scalp_stop(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -1154,42 +1327,110 @@ class TelegramBot:
                 "<code>/scalp_add [종목코드]</code>\n"
                 "<code>/scalp_add [종목코드] [종목명]</code>\n\n"
                 "예) <code>/scalp_add 005930</code>\n"
-                "예) <code>/scalp_add 247540 에코프로비엠</code>\n\n"
-                "추가된 종목은 장중 자동 스캔 종목과 동일한 "
-                "단타 로직으로 매매됩니다."
+                "예) <code>/scalp_add 247540 에코프로비엠</code>"
             )
             return
 
-        code = args[0].strip().zfill(6)    # 6자리 패딩
-        name = args[1] if len(args) > 1 else ""
+        raw_code = args[0].strip()
+        name     = args[1] if len(args) > 1 else ""
+
+        # ── 코드 형식 검증 ─────────────────────────────────────
+        # 국내 종목코드: 숫자만 6자리
+        if not raw_code.isdigit():
+            await update.message.reply_html(
+                f"❌ <b>잘못된 종목코드</b>: <code>{raw_code}</code>\n\n"
+                f"국내 종목코드는 숫자 6자리입니다.\n"
+                f"예) <code>/scalp_add 005930</code>"
+            )
+            return
+
+        code = raw_code.zfill(6)   # 앞자리 0 패딩
 
         await update.message.reply_text(f"🔍 {code} 종목 정보 조회 중...")
+
+        # ── 종목 유효성 검증 (API 실시간 조회) ───────────────────
+        info     = None
+        cur      = 0
+        verified = False
+
+        try:
+            info = await asyncio.to_thread(self.broker.get_stock_info, code)
+
+            # 유효한 종목 기준:
+            #   1. cur_price 가 0보다 큼
+            #   2. name 이 비어있지 않음
+            cur  = info.get("cur_price", 0)
+            api_name = info.get("name", "").strip()
+
+            if cur <= 0 or not api_name:
+                await update.message.reply_html(
+                    f"❌ <b>조회 불가 종목</b>: <code>{code}</code>\n\n"
+                    f"현재가: {cur:,}원  종목명: '{api_name}'\n\n"
+                    f"코드를 다시 확인해 주세요.\n"
+                    f"올바른 코드 확인: 키움 HTS / 네이버 금융"
+                )
+                return
+
+            # 이름 미입력 시 API 조회값 사용
+            if not name:
+                name = api_name
+
+            verified = True
+
+        except Exception as e:
+            err_str = str(e)
+            # 429: API 한도 초과 → 이름 직접 입력 유도
+            if "429" in err_str:
+                if not name:
+                    await update.message.reply_html(
+                        f"⚠️ <b>API 한도 초과 (429)</b>\n\n"
+                        f"종목 조회를 잠시 후 다시 시도하거나,\n"
+                        f"종목명을 직접 입력해 주세요.\n\n"
+                        f"예) <code>/scalp_add {code} 종목명</code>"
+                    )
+                    return
+                # 이름 직접 입력 시 429여도 등록 허용 (cur_price = 0)
+                cur      = 0
+                verified = True   # 이름이 있으면 일단 등록 허용
+            else:
+                await update.message.reply_html(
+                    f"❌ <b>종목 조회 실패</b>: <code>{code}</code>\n\n"
+                    f"오류: {err_str}\n\n"
+                    f"코드를 다시 확인해 주세요."
+                )
+                return
+
+        if not verified:
+            return
+
+        # ── 감시 목록 등록 ────────────────────────────────────
         try:
             result = self.scalp_strategy.watchlist_add(code, name)
         except Exception as e:
-            await update.message.reply_text(f"❌ 오류: {e}")
+            await update.message.reply_text(f"❌ 등록 오류: {e}")
             return
 
         if result["ok"]:
-            item = result["item"]
-            cur  = 0
+            item     = result["item"]
+            flu_rt   = info.get("flu_rt", "0") if info else "0"
             try:
-                info = self.broker.get_stock_info(code)
-                cur  = info.get("cur_price", 0)
+                flu_val = float(flu_rt)
+                flu_str = f"({'🔺' if flu_val >= 0 else '🔻'}{flu_val:+.2f}%)"
             except Exception:
-                pass
+                flu_str = ""
 
             msg = (
                 f"✅ <b>하이브리드 감시 추가</b>\n\n"
                 f"📌 종목: <b>{item['name']}({code})</b>\n"
-                f"💰 현재가: {cur:,}원\n\n"
-                f"이 종목은 다음 30초 루프부터 자동으로 매수 시도합니다.\n"
+                f"💰 현재가: <b>{cur:,}원</b> {flu_str}\n\n"
+                f"다음 30초 루프부터 자동 매수 시도합니다.\n"
                 f"진입 조건: 포지션 여유 + 현금 + 진입 마감 시각 이내\n\n"
                 f"<i>/scalp_remove {code} — 감시 중단\n"
                 f"/scalp_watchlist — 전체 목록 확인</i>"
             )
             await update.message.reply_html(msg)
         else:
+            # 이미 감시 중 등
             await update.message.reply_text(result["msg"])
 
     async def cmd_scalp_remove(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -1430,6 +1671,7 @@ class TelegramBot:
                 "scalp_ctrl":   self._guide_scalp_ctrl,
                 "scalp_sum":    self._guide_scalp_sum,
                 "scalp_cfg":    self._guide_scalp_cfg,
+                "hybrid":       self._guide_hybrid,
                 "params":       self._guide_params,
                 "scalp_params": self._guide_scalp_params,
                 "costs":        self._guide_costs,

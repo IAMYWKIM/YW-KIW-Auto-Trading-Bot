@@ -235,10 +235,16 @@ class MarketFilter:
             # 외인 필드가 없는 경우 상위 종목 상승률로 대리 판단
             if foreign_buy_cnt == 0:
                 # 상위 10개 중 5개 이상이 +5% 넘으면 외인 유입 가능성
-                surging = sum(
-                    1 for item in items
-                    if abs(int((str(item.get("flu_rt", "0")).lstrip("+-") or "0").lstrip("0") or "0")) >= 5
-                )
+                # flu_rt는 '+3.87' 같은 소수점 문자열 → float 변환 필요
+                surging = 0
+                for item in items:
+                    try:
+                        flu_str = str(item.get("flu_rt", "0")).strip()
+                        flu_val = abs(float(flu_str))
+                        if flu_val >= 5:
+                            surging += 1
+                    except (ValueError, TypeError):
+                        pass
                 if surging >= 7:   return 35
                 elif surging >= 5: return 25
                 elif surging >= 3: return 15

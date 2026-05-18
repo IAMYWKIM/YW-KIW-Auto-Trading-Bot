@@ -11,6 +11,7 @@ v1.0: strategy_config.py와 동일한 JSON 파일 기반 패턴으로 작성
   - 원자적 쓰기(tmp → replace)로 설정 파일 손상 방지
 """
 
+import copy
 import json
 import logging
 import os
@@ -178,15 +179,25 @@ class ScalpConfig:
             logger.info("[ScalpConfig] 기본 설정 파일 생성")
 
     def _read(self) -> dict:
+        """
+        설정 파일 읽기.
+        오류 시 DEFAULTS 깊은 복사본 반환 (원본 DEFAULTS 변조 방지).
+        """
         try:
-            data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-            return self._deep_merge(DEFAULTS, data)
+            raw  = CONFIG_FILE.read_text(encoding="utf-8")
+            data = json.loads(raw)
+            return self._deep_merge(copy.deepcopy(DEFAULTS), data)
         except Exception as e:
             logger.warning(f"[ScalpConfig] 설정 읽기 실패, 기본값 사용: {e}")
-            return dict(DEFAULTS)
+            return copy.deepcopy(DEFAULTS)   # 얕은 복사 → 깊은 복사로 수정
 
     def _write(self, data: dict) -> bool:
+        """
+        설정 파일 원자적 쓰기 (tmp → replace).
+        성공 시 True, 실패 시 False + 에러 로그.
+        """
         try:
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
             fd, tmp = tempfile.mkstemp(dir=str(DATA_DIR), suffix=".tmp")
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
@@ -196,9 +207,19 @@ class ScalpConfig:
             return True
         except Exception as e:
             logger.error(f"[ScalpConfig] 쓰기 실패: {e}")
+            # 임시 파일 정리
+            try:
+                if 'tmp' in dir() and os.path.exists(tmp):
+                    os.unlink(tmp)
+            except Exception:
+                pass
             return False
 
     def _deep_merge(self, base: dict, override: dict) -> dict:
+        """
+        base를 기준으로 override 값을 덮어쓰는 깊은 병합.
+        override에 없는 키는 base의 기본값을 유지.
+        """
         result = dict(base)
         for k, v in override.items():
             if k in result and isinstance(result[k], dict) and isinstance(v, dict):
@@ -215,6 +236,7 @@ class ScalpConfig:
     def get_all(self)   -> dict: return self._read()
 
     def get(self, key: str) -> Any:
+        """단일 키 조회 (예: 'exit.stop_loss_pct')"""
         parts = key.split(".")
         data  = self._read()
         for p in parts:
@@ -223,34 +245,98 @@ class ScalpConfig:
             data = data[p]
         return data
 
-    def set(self, key: str, value: Any) -> bool:
+    def set(self, key: str, value: Any) -> tuple[bool, str]:
+        """
+        설정값 변경 후 파일에 저장.
+
+        Returns:
+            (True, "변경 전 값 → 변경 후 값") — 성공
+            (False, "에러 메시지")             — 실패
+
+        Raises:
+            KeyError: 키가 존재하지 않을 때
+            ValueError: 값 타입 변환 실패 시
+        """
         parts = key.split(".")
-        data  = self._read()
-        node  = data
+        if len(parts) < 2:
+            raise KeyError(f"키 형식 오류 (점 구분 필요): {key}")
+
+        data = self._read()
+        node = data
+
+        # 부모 노드까지 탐색
         for p in parts[:-1]:
             if p not in node or not isinstance(node[p], dict):
                 raise KeyError(f"설정 경로 없음: {key}")
             node = node[p]
-        if parts[-1] not in node:
+
+        # 최종 키 존재 확인
+        leaf = parts[-1]
+        if leaf not in node:
             raise KeyError(f"설정 키 없음: {key}")
-        orig = node[parts[-1]]
+
+        orig     = node[leaf]
+        orig_str = str(orig)
+
+        # 타입에 맞게 변환
         if isinstance(orig, bool):
-            value = str(value).lower() in ("true", "1", "yes")
+            value = str(value).strip().lower() in ("true", "1", "yes")
         elif isinstance(orig, int):
-            value = int(value)
+            try:
+                value = int(float(str(value).strip()))  # "3.0" → 3 허용
+            except (ValueError, TypeError):
+                raise ValueError(
+                    f"'{value}'를 정수로 변환할 수 없습니다 "
+                    f"(키: {key}, 현재 타입: int)"
+                )
         elif isinstance(orig, float):
-            value = float(value)
-        node[parts[-1]] = value
-        from datetime import datetime
-        data["meta"]["last_modified"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            try:
+                value = float(str(value).strip())
+            except (ValueError, TypeError):
+                raise ValueError(
+                    f"'{value}'를 실수로 변환할 수 없습니다 "
+                    f"(키: {key}, 현재 타입: float)"
+                )
+        else:
+            value = str(value).strip()   # 문자열 그대로
+
+        # 값이 같으면 스킵
+        if value == orig:
+            return True, f"변경 없음 (현재값: {orig_str})"
+
+        # 변경 적용
+        node[leaf] = value
+
+        # meta 업데이트 (없으면 무시)
+        if "meta" in data and isinstance(data["meta"], dict):
+            from datetime import datetime
+            data["meta"]["last_modified"] = (
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            )
+
         ok = self._write(data)
         if ok:
-            logger.info(f"[ScalpConfig] {key} = {value}")
-        return ok
+            logger.info(f"[ScalpConfig] 설정 변경: {key} = {orig_str} → {value}")
+            # 검증: 실제로 파일에 반영됐는지 재확인
+            try:
+                saved = self.get(key)
+                if saved != value:
+                    logger.error(
+                        f"[ScalpConfig] 쓰기 후 검증 실패: "
+                        f"기대={value}, 실제={saved}"
+                    )
+                    return False, f"쓰기 후 검증 실패: 기대={value}, 실제={saved}"
+            except Exception as e:
+                logger.warning(f"[ScalpConfig] 쓰기 후 검증 오류: {e}")
+            return True, f"{orig_str} → {value}"
+        else:
+            return False, f"파일 쓰기 실패 (권한/경로 문제 확인 필요)"
 
     def reset_to_defaults(self) -> bool:
-        logger.info("[ScalpConfig] 기본값으로 초기화")
-        return self._write(DEFAULTS)
+        ok = self._write(copy.deepcopy(DEFAULTS))
+        if ok:
+            logger.info("[ScalpConfig] 기본값으로 초기화")
+        return ok
 
     def format_for_telegram(self, group: str = "all") -> str:
         data   = self._read()
