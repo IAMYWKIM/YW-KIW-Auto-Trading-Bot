@@ -1,5 +1,10 @@
 """
-strategy.py v1.4.2 — 키움 조건검색식 기반 종가베팅 스캔 (배포용 최신본)
+strategy.py v1.4.3 — 키움 조건검색식 기반 종가베팅 스캔 (배포용 최신본)
+
+[v1.4.2 → v1.4.3 변경]
+  surge_lookback_days 확장에 따른 로그 강화
+  전일종가 없음 오류(주성엔지니어링 케이스) 방어 코드 추가
+  check_recent_surge_strong: DEBUG → INFO 레벨 탈락 사유 출력
 
 [v1.3.2 버그 수정 반영]
   BUG2: 수급 데이터 항상 수집 (use_*_buy 플래그와 분리)
@@ -344,7 +349,8 @@ class Strategy:
     def check_recent_surge_strong(self, closes: list, trading_values: list) -> dict:
         """
         최근 N일 이내 강한 급등일 확인
-        조건: 거래대금 1000억 이상 AND (상한가 or +20% 이상) 인 날이 존재
+        조건: 거래대금 surge_min_tv 이상 AND surge_min_pct% 이상 인 날이 존재
+        v1.4.3: INFO 레벨 탈락 사유 출력 추가
         반환: {
           "pass": bool,
           "surge_pct": float,      # 급등일의 등락률
@@ -354,21 +360,26 @@ class Strategy:
         }
         """
         cfg          = self.scfg.get_scan()
-        lookback     = cfg.get("surge_lookback_days", 5)
-        min_surge    = cfg.get("surge_min_pct", 20.0)
-        min_tv_surge = cfg.get("surge_min_tv", 100_000_000_000)  # 1000억
+        lookback     = cfg.get("surge_lookback_days", 10)
+        min_surge    = cfg.get("surge_min_pct", 15.0)
+        min_tv_surge = cfg.get("surge_min_tv", 30_000_000_000)  # 300억
 
         check_range = min(lookback + 1, len(closes) - 1, len(trading_values))
         best = {"pass": False, "surge_pct": 0.0, "surge_days_ago": -1,
                 "surge_tv": 0.0, "is_upper_limit": False}
 
+        best_pct_found = 0.0   # 거래대금 미달이라도 최대 등락률 추적 (로그용)
+        best_tv_found  = 0.0   # 등락률 미달이라도 최대 거래대금 추적 (로그용)
+
         for i in range(check_range):
-            prev  = closes[i + 1] if i + 1 < len(closes) else 0
-            cur   = closes[i]
-            tv    = trading_values[i] if i < len(trading_values) else 0
+            prev = closes[i + 1] if i + 1 < len(closes) else 0
+            cur  = closes[i]
+            tv   = trading_values[i] if i < len(trading_values) else 0
             if prev <= 0:
                 continue
             pct = (cur - prev) / prev * 100
+            best_pct_found = max(best_pct_found, pct)
+            best_tv_found  = max(best_tv_found, tv)
             if pct >= min_surge and tv >= min_tv_surge:
                 if pct > best["surge_pct"]:
                     best = {
@@ -378,6 +389,28 @@ class Strategy:
                         "surge_tv":       round(tv / 100_000_000, 1),
                         "is_upper_limit": pct >= 29.5,
                     }
+
+        # v1.4.3: 탈락 시 INFO 로그로 원인 출력
+        if not best["pass"]:
+            if best_pct_found >= min_surge:
+                # 등락률은 충족했으나 거래대금 미달
+                logger.debug(
+                    f"[Strategy] 급등조건 실패(거래대금미달) — "
+                    f"최대등락:{best_pct_found:+.1f}% 최대TV:{best_tv_found/100_000_000:.0f}억 "
+                    f"(기준: {min_tv_surge/100_000_000:.0f}억↑)"
+                )
+            elif best_tv_found >= min_tv_surge:
+                # 거래대금은 충족했으나 등락률 미달
+                logger.debug(
+                    f"[Strategy] 급등조건 실패(등락률미달) — "
+                    f"최대등락:{best_pct_found:+.1f}% (기준: {min_surge:.0f}%↑)"
+                )
+            else:
+                logger.debug(
+                    f"[Strategy] 급등조건 실패 — "
+                    f"최근 {lookback}일 내 {min_surge:.0f}%+/{min_tv_surge/100_000_000:.0f}억+ 없음 "
+                    f"(최대등락:{best_pct_found:+.1f}% 최대TV:{best_tv_found/100_000_000:.0f}억)"
+                )
         return best
 
     def check_pullback_condition(self, closes: list, daily: dict) -> dict:
@@ -489,7 +522,12 @@ class Strategy:
         # ── 조건 2~4: 오늘 눌림 + MA5 유지 + Envelope 위 ────
         pb = self.check_pullback_condition(closes, daily)
         if not pb["pass"]:
-            logger.debug(f"[Strategy] {code} 눌림조건 실패 — {pb.get('reason', '')}")
+            reason = pb.get('reason', '')
+            # v1.4.3: 전일종가 없음 → INFO 레벨로 기록 (주성엔지니어링 케이스 방어)
+            if "전일 종가 없음" in reason or closes[1] <= 0 if len(closes) > 1 else True:
+                logger.info(f"[Strategy] {code} 전일종가 없음 또는 눌림조건 실패 — {reason}")
+            else:
+                logger.debug(f"[Strategy] {code} 눌림조건 실패 — {reason}")
             return None
 
         # ── 조건 5: 거래대금 (전일 OR 당일) ─────────────────

@@ -59,6 +59,9 @@ DEFAULTS: dict[str, Any] = {
         # 제외 조건
         "exclude_already_held":  True,           # 이미 보유 중인 종목 제외
         "exclude_upper_limit":   True,           # 상한가(+29.9%) 이상 제외
+
+        # v1.3 신규상장 종목 감지
+        "new_listing_days":      60,             # 신규상장 N일 이내 종목 별도 스캔
     },
 
     # ── ENTRY: 진입 조건 ───────────────────────────────────────
@@ -69,6 +72,8 @@ DEFAULTS: dict[str, Any] = {
         # VWAP 필터 — 가격이 VWAP 이상일 때만 진입 (상승 모멘텀 확인)
         "use_vwap_filter":       True,           # True: 현재가 > VWAP 조건 추가
         "vwap_margin_pct":       0.0,            # VWAP 대비 최소 % (0 = 같거나 이상)
+        "vwap_top_n":            10,             # v1.3 VWAP 계산 상위 N개 (기존 5개)
+        "new_listing_vwap_tolerance_pct": -5.0,  # v1.3 신규상장 VWAP 허용 범위 (%)
 
         # 동일 종목 재진입 쿨다운
         "cooldown_sec":          300,            # 동일 종목 매도 후 5분간 재진입 금지
@@ -148,9 +153,12 @@ PARAM_DESCRIPTIONS = {
     "scan.entry_end_time":        ("신규 진입 마감",              "HH:MM",      "13:00"),
     "scan.api_delay_sec":         ("API 호출 간격 (초) — 모의:0.5, 실전:0.3",  "실수",       "0.5"),
     "scan.max_candidates":        ("스캔 대상 종목 수",           "정수",       "30"),
+    "scan.new_listing_days":      ("신규상장 감지 기간 (일)",      "정수",       "60"),
     "entry.max_positions":        ("최대 동시 보유 종목",         "정수",       "3"),
     "entry.position_size_pct":    ("종목당 투자 비율 (%)",        "정수",       "20"),
     "entry.use_vwap_filter":      ("VWAP 필터 사용",             "true/false", "true"),
+    "entry.vwap_top_n":           ("VWAP 계산 상위 N개",         "정수",       "10"),
+    "entry.new_listing_vwap_tolerance_pct": ("신규상장 VWAP 허용범위 (%)", "실수 음수", "-5.0"),
     "entry.cooldown_sec":         ("재진입 쿨다운 (초)",          "정수",       "300"),
     "exit.take_profit_pct":       ("전량 익절선 (%)",            "실수",       "2.5"),
     "exit.stop_loss_pct":         ("손절선 (%)",                 "실수 음수",  "-1.5"),

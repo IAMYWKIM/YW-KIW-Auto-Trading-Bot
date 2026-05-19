@@ -1,6 +1,6 @@
 """
 strategy_scalping.py — 단타 진입·청산·포지션 관리 전략 엔진
-v1.0: 장중 단타 매매 신호 생성 및 포지션 상태 관리
+v1.1: 장중 단타 매매 신호 생성 및 포지션 상태 관리
 
 [종가베팅 strategy.py와의 역할 분리]
   strategy.py      → 종가베팅 전용 (ka10081 일봉, 조건A~G, 눌림 등)
@@ -26,6 +26,14 @@ v1.0: 장중 단타 매매 신호 생성 및 포지션 상태 관리
   4순위: 부분 익절 (partial_profit_pct 도달 시 50% 매도)
   5순위: 시간 손절 (매수 후 N분 경과, 수익 없으면 청산)
   6순위: 강제 청산 (15:20)
+
+[v1.1 변경]
+  - 매도 API 오류 코드별 자동 처리 추가
+    · 800033(모의투자 수량 부족) → 포지션 강제 삭제
+    · 800034(매도 가능 수량 0) → 포지션 강제 삭제
+    · 연속 매도 실패 3회 → 포지션 강제 삭제
+  - sync_with_account(): 실제 계좌와 포지션 불일치 자동 정리
+  - force_remove_position(): 포지션만 삭제 (주문 없이)
 """
 
 import json
@@ -184,6 +192,9 @@ class ScalpStrategy:
 
         # 연속 손절 카운터
         self._consecutive_loss: int = 0
+
+        # [v1.1] 매도 실패 카운터 {code: 연속실패횟수}
+        self._sell_fail_count: dict[str, int] = {}
 
         # 일일 매매 이력 로드
         self._daily_log: dict = _read_json_safe(DAILY_LOG_FILE, {})
@@ -904,6 +915,131 @@ class ScalpStrategy:
                     logger.error(f"[ScalpStrategy] 강제 청산 실패: {code}")
             except Exception as e:
                 logger.error(f"[ScalpStrategy] 강제 청산 오류 {code}: {e}")
+        return exited
+
+    # ──────────────────────────────────────────────────────────
+    # [v1.1] 매도 실패 처리 + 포지션 불일치 자동 정리
+    # ──────────────────────────────────────────────────────────
+
+    # 포지션 강제 삭제 트리거 오류 코드
+    _FORCE_REMOVE_ERROR_CODES = {
+        "800033",  # 모의투자 매도 가능수량 부족
+        "800034",  # 매도 가능 수량 0
+        "800012",  # 주문 가능 수량 없음
+    }
+    # 연속 실패 허용 횟수 (초과 시 포지션 강제 삭제)
+    _MAX_SELL_FAIL = 3
+
+    def handle_sell_failure(
+        self,
+        code      : str,
+        error_code: str = "",
+        error_msg : str = "",
+    ) -> dict:
+        """
+        매도 실패 시 호출. 오류 코드에 따라 자동 처리.
+
+        Returns
+        -------
+        {"action": "force_removed" | "retry" | "ignore", "msg": str}
+        """
+        pos = self._positions.get(code)
+        if not pos:
+            return {"action": "ignore", "msg": "포지션 없음"}
+
+        # ── 즉시 강제 삭제 오류 코드 ────────────────────────────
+        if error_code in self._FORCE_REMOVE_ERROR_CODES:
+            msg = (
+                f"[ScalpStrategy] {code} 매도 오류 {error_code} "
+                f"({error_msg}) → 포지션 강제 삭제"
+            )
+            logger.warning(msg)
+            self.force_remove_position(code, reason=f"매도불가 {error_code}")
+            return {"action": "force_removed", "msg": msg}
+
+        # ── 연속 실패 카운터 누적 ────────────────────────────────
+        self._sell_fail_count[code] = self._sell_fail_count.get(code, 0) + 1
+        fail_cnt = self._sell_fail_count[code]
+
+        if fail_cnt >= self._MAX_SELL_FAIL:
+            msg = (
+                f"[ScalpStrategy] {code} 연속 매도 실패 {fail_cnt}회 "
+                f"→ 포지션 강제 삭제"
+            )
+            logger.warning(msg)
+            self.force_remove_position(code, reason=f"연속매도실패 {fail_cnt}회")
+            self._sell_fail_count.pop(code, None)
+            return {"action": "force_removed", "msg": msg}
+
+        logger.info(
+            f"[ScalpStrategy] {code} 매도 실패 {fail_cnt}/{self._MAX_SELL_FAIL} "
+            f"— 다음 사이클 재시도"
+        )
+        return {"action": "retry", "msg": f"매도 재시도 대기 ({fail_cnt}회)"}
+
+    def force_remove_position(
+        self,
+        code  : str,
+        reason: str = "강제삭제",
+    ) -> bool:
+        """
+        API 주문 없이 포지션 기록만 삭제.
+        실제 계좌와 불일치 해소용.
+
+        Returns: 삭제 성공 여부
+        """
+        pos = self._positions.pop(code, None)
+        if not pos:
+            logger.warning(f"[ScalpStrategy] force_remove: {code} 포지션 없음")
+            return False
+
+        self._save_positions()
+        self._sell_fail_count.pop(code, None)
+
+        # 쿨다운 등록 (재진입 방지)
+        import time as _time
+        self._cooldown[code] = _time.time()
+
+        logger.info(
+            f"[ScalpStrategy] 포지션 강제 삭제: {pos.name}({code}) "
+            f"{pos.qty}주 @{pos.buy_price:,}원 — {reason}"
+        )
+        return True
+
+    def sync_with_account(self) -> list[str]:
+        """
+        실제 계좌 보유 종목과 봇 포지션을 비교하여
+        불일치 종목(봇에만 있고 계좌에 없는 종목)을 자동 삭제.
+
+        Returns: 삭제된 종목 코드 리스트
+        """
+        if not self._positions:
+            return []
+        try:
+            # 실제 계좌 보유 종목 조회
+            balance  = self.broker.get_balance()
+            holdings = balance.get("holdings", [])
+            held_codes = {h["code"] for h in holdings}
+        except Exception as e:
+            logger.error(f"[ScalpStrategy] sync_with_account 잔고 조회 실패: {e}")
+            return []
+
+        removed = []
+        for code in list(self._positions.keys()):
+            if code not in held_codes:
+                logger.warning(
+                    f"[ScalpStrategy] 불일치 감지: {code} "
+                    f"봇 포지션 있음 / 실제 계좌 없음 → 강제 삭제"
+                )
+                self.force_remove_position(code, reason="계좌불일치 자동정리")
+                removed.append(code)
+
+        if removed:
+            logger.info(
+                f"[ScalpStrategy] sync 완료 — {len(removed)}개 불일치 정리: "
+                f"{', '.join(removed)}"
+            )
+        return removed
         return exited
 
     # ──────────────────────────────────────────────────────────

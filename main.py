@@ -416,6 +416,16 @@ async def job_scalp_pre_market():
         scalp_strategy.init_daily(cash)
         scalp_strategy.load_positions()
         logger.info(f"[Scalp] 잔고 확인 — 가용 현금: {cash:,}원")
+
+        # ── [v1.1] 계좌 불일치 자동 정리 ─────────────────────
+        removed = scalp_strategy.sync_with_account()
+        if removed:
+            logger.warning(f"[Scalp] 불일치 정리: {removed}")
+            await bot.send(
+                f"⚠️ <b>[단타 포지션 불일치 정리]</b>\n"
+                f"실제 계좌에 없는 포지션 {len(removed)}개 삭제\n"
+                f"종목: {', '.join(removed)}"
+            )
     except Exception as e:
         logger.error(f"[Scalp] 잔고 조회 실패: {e}")
         cash = 0
@@ -471,6 +481,8 @@ async def job_scalp_loop():
                 broker.sell_order, pos.code, sell_qty, 0, "3"
             )
             if result["success"]:
+                # 매도 성공 시 실패 카운터 초기화
+                scalp_strategy._sell_fail_count.pop(pos.code, None)
                 trade = scalp_strategy.remove_position(
                     pos.code, cur_price, sell_qty, exit_sig["reason"]
                 )
@@ -479,7 +491,7 @@ async def job_scalp_loop():
                         pos.code, pos.name, sell_qty,
                         cur_price, pos.buy_price,
                         reason   = exit_sig["reason"],
-                        buy_time = pos.buy_time,          # 매수 시각 전달
+                        buy_time = pos.buy_time,
                         source   = getattr(pos, "source", ""),
                         score    = getattr(pos, "score",  0),
                     )
@@ -488,7 +500,24 @@ async def job_scalp_loop():
                         f"{sell_qty}주 {trade['profit']:+,}원 — {exit_sig['reason']}"
                     )
             else:
-                logger.error(f"[Scalp] 매도 실패: {pos.code}")
+                # ── [v1.1] 매도 실패 처리 ─────────────────────────
+                error_code = str(result.get("error_code", ""))
+                error_msg  = str(result.get("error_msg",  ""))
+                handle = scalp_strategy.handle_sell_failure(
+                    pos.code, error_code, error_msg
+                )
+                logger.error(
+                    f"[Scalp] 매도 실패: {pos.code} "
+                    f"[{error_code}] {error_msg} → {handle['action']}"
+                )
+                # 강제 삭제된 경우 텔레그램 알림
+                if handle["action"] == "force_removed":
+                    await bot.send(
+                        f"⚠️ <b>[단타 포지션 강제 삭제]</b>\n"
+                        f"{pos.name}({pos.code})\n"
+                        f"사유: 매도불가 {error_code or '연속실패'}\n"
+                        f"<i>실제 계좌와 불일치 → 포지션 기록 삭제</i>"
+                    )
 
         except Exception as e:
             logger.error(f"[Scalp] 포지션 감시 오류 {pos.code}: {e}")

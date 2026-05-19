@@ -1,6 +1,13 @@
 """
 strategy_config.py — 종가베팅 전략 조건 설정 관리자
-v1.3: 거래대금 하향, 눌림 범위 확대, 최근 급등 스캔 조건 추가
+v1.4: 급등일 탐색 범위 확대, 거래대금 기준 완화, 눌림 범위 확대
+
+[v1.3 → v1.4 변경]
+  surge_lookback_days: 5 → 10   (저스템·삼아알미늄 등 D-6 이상 급등 종목 포함)
+  surge_min_tv: 1000억 → 300억  (소형 급등주 포함 — 저스템 164억, 삼아알미늄 165억)
+  surge_min_pct: 20% → 15%      (중간 급등 종목도 포함)
+  pullback_max_pct_scan: 0% → 2% (오늘 소폭 상승 중인 종목도 허용)
+  min_trading_value: 100억 → 30억 (소형주 포함 — 저스템, 삼아알미늄)
 """
 
 import json
@@ -21,7 +28,8 @@ DEFAULTS: dict[str, Any] = {
     # ── SCAN: 종목 스캔 조건 ───────────────────────────────────
     "scan": {
         # ▼ v1.3: 500억 → 100억 (다날·보원케미칼·한패스 포함)
-        "min_trading_value":       10_000_000_000,  # 거래대금 최소 100억원 (조건B 기준)
+        # ▼ v1.4: 100억 → 30억 (저스템·삼아알미늄 등 소형주 포함)
+        "min_trading_value":       3_000_000_000,   # 거래대금 최소 30억원 (조건B 기준)
         "volume_ratio_min":        1.5,             # 전일 대비 거래량 최소 150%
         "volume_ratio_prefer":     3.0,             # 선호 거래량 비율
         "use_52w_high":            True,
@@ -38,7 +46,7 @@ DEFAULTS: dict[str, Any] = {
         "exclude_etf":             True,
         "markets":                 ["KRX"],
         # ▼ v1.3: 최근 N일 내 급등 탐지 조건
-        "recent_surge_days":       5,               # 최근 5거래일 내 급등 확인
+        "recent_surge_days":       10,              # ▼ v1.4: 5→10일 (D-6 종목 포함)
         "recent_surge_min_pct":    5.0,             # 최근 5일 내 최소 5% 이상 급등일 존재
         # ▼ v1.4: 키움 조건검색식 A~G 파라미터
         "envelope_period":         20,              # Envelope 이동평균 기간 (조건A/C)
@@ -49,11 +57,12 @@ DEFAULTS: dict[str, Any] = {
         "cond_g_min_tv":           30_000_000_000, # 조건G: 당일 거래대금 기준 (300억)
         "api_delay_sec":           0.5,            # 일봉 API 호출 간격 (초) — 429 방지
         # ▼ v1.5.0: 급등 후 눌림 전략 파라미터
-        "surge_lookback_days":     5,              # 급등일 탐색 범위 (최근 N일)
-        "surge_min_pct":           20.0,           # 급등 최소 등락률 (%) — 20%=급등, 29.5%=상한가
-        "surge_min_tv":            100_000_000_000, # 급등일 최소 거래대금 (1000억)
+        # ▼ v1.4: surge_lookback_days 5→10, surge_min_tv 1000억→300억
+        "surge_lookback_days":     10,             # ▼ v1.4: 5→10일 (D-6 이상 급등 포함)
+        "surge_min_pct":           15.0,           # ▼ v1.4: 20%→15% (중간 급등도 포함)
+        "surge_min_tv":            30_000_000_000, # ▼ v1.4: 1000억→300억 (저스템 164억 등 포함)
         "pullback_min_pct_scan":   -5.0,           # 오늘 눌림 최소 (%) — -5% 이상 하락만 허용
-        "pullback_max_pct_scan":   0.0,            # 오늘 눌림 최대 (%) — 0% 이하만 (상승 중 제외)
+        "pullback_max_pct_scan":   2.0,            # ▼ v1.4: 0%→2% (소폭 상승 중도 허용)
     },
 
     # ── ENTRY: 진입 조건 ───────────────────────────────────────
@@ -96,8 +105,8 @@ DEFAULTS: dict[str, Any] = {
     },
 
     "meta": {
-        "version":        "1.3",
-        "description":    "종가베팅 전략 설정 — 최근급등+눌림 최적화",
+        "version":        "1.4",
+        "description":    "종가베팅 전략 설정 — 급등일 범위 확대 + 소형주 포함",
         "last_modified":  "",
     },
 }

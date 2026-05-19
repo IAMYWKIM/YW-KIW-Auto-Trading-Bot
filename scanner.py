@@ -1,6 +1,16 @@
 """
 scanner.py — 키움 국내주식 단타 자동매매 종목 스캐너
-v1.2: API 호출 최소화 — 빠른 스캔 구조로 전면 개선
+v1.3: 신규상장 종목 감지 + 스캔 풀 확대 + VWAP 완화
+
+[v1.2 → v1.3 핵심 변경]
+  문제1: 신규상장 종목(상장 60일 미만)이 스캔 풀에 안 잡히는 문제
+         → _source_new_listing() 소스 추가 (ka10016 신고가 기반)
+  문제2: 상위 5개 VWAP 계산 제한 → 탐색 기회 부족
+         → scalp_config scan.vwap_top_n 설정 추가 (기본 10개)
+  문제3: 신규상장 종목 VWAP 하회로 무조건 거부
+         → 상장 N일 미만 종목은 VWAP 필터 완화 (tolerance 적용)
+  문제4: 상승률 15~20% 구간 점수 낮음 (8점)
+         → 신규상장 종목 보너스 점수 +10점 추가
 
 [v1.1 → v1.2 핵심 변경]
   문제: 캐시 미스 시 종목마다 ka10081(일봉) + ka10080(VWAP) 개별 호출
@@ -9,18 +19,13 @@ v1.2: API 호출 최소화 — 빠른 스캔 구조로 전면 개선
     ① _get_prev_day_volumes() — scan() 루프 내 개별 호출 완전 제거
        캐시 없으면 volume_ratio=0 처리 (중간 점수, 필터 통과)
        init_daily() 호출 시에만 캐시 구축
-    ② VWAP — 필터 통과한 최종 후보 상위 5개만 계산
-       모든 후보를 대상으로 하지 않음
+    ② VWAP — 필터 통과한 최종 후보 상위 N개만 계산
     ③ 소스간 딜레이 1초 유지 (429 방지)
     ④ 상세 조회 429 재시도 유지 (2초→4초→6초)
 
 [API 호출 횟수 비교]
-  v1.1: 소스3회 + 상세30회 + 일봉30회 + VWAP30회 = 93회
-  v1.2: 소스3회 + 상세30회 + VWAP5회             = 38회 (59% 감소)
-
-[스캔 예상 소요시간]
-  v1.1: 30 × (0.3초 + 1.5초 + 0.3초) ≈ 63초 (사실상 타임아웃)
-  v1.2: 3 + 30×0.3초 + 5×0.5초       ≈ 14초
+  v1.2: 소스3회 + 상세30회 + VWAP5회              = 38회
+  v1.3: 소스4회 + 상세30회 + VWAP10회 + 신규5회   = 49회 (신규상장 포함)
 """
 
 import logging
@@ -72,8 +77,9 @@ class DayTradingScanner:
     def __init__(self, broker: KiwoomBroker, scalp_cfg: ScalpConfig):
         self.broker             = broker
         self.cfg                = scalp_cfg
-        self._prev_vol_cache: dict[str, int] = {}   # init_daily() 로 채워짐
-        self.last_scan_result:  list[dict]   = []
+        self._prev_vol_cache: dict[str, int]  = {}   # init_daily() 로 채워짐
+        self._listing_date:   dict[str, str]  = {}   # 신규상장 종목 상장일 캐시
+        self.last_scan_result:  list[dict]    = []
 
     # ──────────────────────────────────────────────────────────
     # 1. 장전 초기화 (08:50 1회 호출 — 선택적)
@@ -147,16 +153,19 @@ class DayTradingScanner:
         src2 = self._source_trading_val()
         time.sleep(1.0)
         src3 = self._source_volume()
+        time.sleep(1.0)
+        src4 = self._source_new_listing()   # v1.3 신규상장 소스 추가
 
         pool: dict[str, dict] = {}
-        for item in src1 + src2 + src3:
+        for item in src1 + src2 + src3 + src4:
             code = item["code"]
             if code and code not in pool:
                 pool[code] = item
 
         logger.info(
             f"[Scanner] 풀 {len(pool)}개 "
-            f"(소스1:{len(src1)} 소스2:{len(src2)} 소스3:{len(src3)})"
+            f"(소스1:{len(src1)} 소스2:{len(src2)} "
+            f"소스3:{len(src3)} 소스4_신규:{len(src4)})"
         )
 
         # ── Step 2: 1차 빠른 필터 (API 호출 없음) ────────────
@@ -227,17 +236,18 @@ class DayTradingScanner:
                 continue
 
             passed.append({
-                "code":          code,
-                "name":          detail["name"],
-                "cur_price":     cur_price,
-                "prev_close":    prev_close,
-                "rise_pct":      round(rise_pct, 2),
-                "volume":        volume,
-                "volume_ratio":  volume_ratio,
-                "trading_value": today_tv,
-                "vwap":          0.0,   # Step 4에서 상위만 채움
-                "source":        item.get("source", ""),
-                "scan_time":     now_str,
+                "code":           code,
+                "name":           detail["name"],
+                "cur_price":      cur_price,
+                "prev_close":     prev_close,
+                "rise_pct":       round(rise_pct, 2),
+                "volume":         volume,
+                "volume_ratio":   volume_ratio,
+                "trading_value":  today_tv,
+                "vwap":           0.0,   # Step 4에서 상위만 채움
+                "source":         item.get("source", ""),
+                "scan_time":      now_str,
+                "is_new_listing": item.get("is_new_listing", False),  # v1.3
             })
             logger.info(
                 f"[Scanner] ✅ {detail['name']}({code}) "
@@ -246,20 +256,29 @@ class DayTradingScanner:
                 f"거래량:{volume_ratio}배"
             )
 
-        # ── Step 4: 1차 점수 정렬 후 상위 5개만 VWAP 계산 ───
-        # VWAP 없이 먼저 점수화 → 상위 5개만 ka10080 호출
+        # ── Step 4: 1차 점수 정렬 후 상위 N개만 VWAP 계산 ───
+        # VWAP 없이 먼저 점수화 → 상위 N개만 ka10080 호출
         for c in passed:
             c["score"] = self._score(c, now_str)
         passed.sort(key=lambda x: x["score"], reverse=True)
 
-        entry_cfg = self.cfg.get_entry()
+        entry_cfg  = self.cfg.get_entry()
+        vwap_top_n = entry_cfg.get("vwap_top_n", 10)   # v1.3: 기본 10개
+        # 신규상장 VWAP 허용 범위 (예: -5 → VWAP 대비 -5%까지 허용)
+        new_listing_vwap_tol = entry_cfg.get("new_listing_vwap_tolerance_pct", -5.0)
+
         if entry_cfg.get("use_vwap_filter", True) and passed:
-            logger.info(f"[Scanner] 상위 {min(5,len(passed))}개 VWAP 계산 중...")
-            for c in passed[:5]:
+            logger.info(
+                f"[Scanner] 상위 {min(vwap_top_n, len(passed))}개 VWAP 계산 중..."
+            )
+            for c in passed[:vwap_top_n]:
                 time.sleep(api_delay)
                 vwap = self.broker.calc_vwap(c["code"])
                 c["vwap"]  = round(vwap, 0)
-                c["score"] = self._score(c, now_str)   # VWAP 반영 재채점
+                c["score"] = self._score(
+                    c, now_str,
+                    new_listing_vwap_tol=new_listing_vwap_tol
+                )
             # VWAP 반영 후 재정렬
             passed.sort(key=lambda x: x["score"], reverse=True)
 
@@ -324,6 +343,68 @@ class DayTradingScanner:
         logger.info(f"[Scanner] 소스3(거래량): {len(result)}개")
         return result
 
+    def _source_new_listing(self) -> list[dict]:
+        """
+        v1.3 신규 — 신규상장 종목 소스 (ka10016 신고가 + 상장일 필터)
+
+        상장 60일 이내 종목 중 당일 5% 이상 상승 중인 종목을 수집.
+        RISE_RANK에서 누락되는 신규상장 강세 종목을 보완한다.
+        """
+        cfg            = self.cfg.get_scan()
+        new_days_limit = cfg.get("new_listing_days", 60)   # 상장 N일 이내
+        result         = []
+        today_str      = datetime.now(KST).strftime("%Y%m%d")
+
+        try:
+            data = self.broker._post(
+                "ka10016", "/api/dostk/stkinfo",
+                {
+                    "mrkt_tp":  "000",   # 전체
+                    "sort_tp":  "1",     # 등락률순
+                    "new_tp":   "1",     # 신규상장 필터
+                    "stex_tp":  "3",
+                }
+            )
+            items = data.get("stk_new_high_qry", [])
+            for item in items[:30]:
+                code     = _clean_code(item.get("stk_cd", "").lstrip("A"))
+                name     = item.get("stk_nm", "")
+                price    = _safe_int(item.get("cur_prc", "0"))
+                list_dt  = item.get("list_dt", "")   # 상장일 YYYYMMDD
+
+                if not code or price <= 0:
+                    continue
+
+                # 상장일 캐시에 저장
+                if list_dt:
+                    self._listing_date[code] = list_dt
+
+                # 상장 경과일 계산
+                if list_dt and len(list_dt) == 8:
+                    try:
+                        from datetime import date
+                        listed = date(int(list_dt[:4]),
+                                      int(list_dt[4:6]),
+                                      int(list_dt[6:8]))
+                        elapsed_days = (date.today() - listed).days
+                        if elapsed_days > new_days_limit:
+                            continue   # 너무 오래된 종목 제외
+                    except Exception:
+                        pass
+
+                result.append({
+                    "code"           : code,
+                    "name"           : name,
+                    "cur_price"      : price,
+                    "source"         : "NEW_LISTING",
+                    "is_new_listing" : True,
+                })
+        except Exception as e:
+            logger.warning(f"[Scanner] 신규상장 소스 실패: {e}")
+
+        logger.info(f"[Scanner] 소스4(신규상장): {len(result)}개")
+        return result
+
     # ──────────────────────────────────────────────────────────
     # 4. 상세 조회 (429 재시도)
     # ──────────────────────────────────────────────────────────
@@ -385,14 +466,20 @@ class DayTradingScanner:
     # 5. 점수화
     # ──────────────────────────────────────────────────────────
 
-    def _score(self, item: dict, now_str: str) -> int:
+    def _score(
+        self,
+        item        : dict,
+        now_str     : str,
+        new_listing_vwap_tol: float = -5.0,
+    ) -> int:
         """
-        단타 후보 점수화 (최대 105점)
-          거래대금  40점: 200억+ =40 / 100억+ =30 / 50억+ =20
+        단타 후보 점수화 (최대 115점)
+          거래대금   40점: 200억+ =40 / 100억+ =30 / 50억+ =20
           거래량비율 30점: 10배+ =30 / 5배+ =20 / 3배+ =10 / 캐시없음 =15
-          모멘텀   20점: 10~15% =20 / 7~10% =15 / 3~7% =10 / 15~20% =8
-          시간대   10점: 09:00~09:30 =10 / ~10:30 =7 / ~13:00 =3
+          모멘텀    20점: 10~15% =20 / 7~10% =15 / 3~7% =10 / 15~20% =8
+          시간대    10점: 09:00~09:30 =10 / ~10:30 =7 / ~13:00 =3
           VWAP보너스 +5점: 현재가 >= VWAP
+          신규상장  +10점: 상장 60일 이내 종목 (v1.3)
         """
         score = 0
 
@@ -413,16 +500,25 @@ class DayTradingScanner:
         elif  7.0 <= rise < 10.0:  score += 15
         elif  3.0 <= rise <  7.0:  score += 10
         elif 15.0 <  rise < 20.0:  score += 8
+        elif 20.0 <= rise < 29.0:  score += 5   # v1.3: 20% 이상도 부분 점수
 
         if   "09:00" <= now_str < "09:30": score += 10
         elif now_str < "10:30":            score += 7
         elif now_str < "13:00":            score += 3
 
+        # VWAP 보너스 — 신규상장은 tolerance 적용
         vwap = item.get("vwap", 0)
         if vwap > 0:
+            is_new = item.get("is_new_listing", False)
             margin = self.cfg.get_entry().get("vwap_margin_pct", 0.0)
-            if item.get("cur_price", 0) >= vwap * (1 + margin / 100):
+            # 신규상장: VWAP보다 tolerance% 아래까지 허용
+            effective_vwap = vwap * (1 + (new_listing_vwap_tol / 100)) if is_new else vwap
+            if item.get("cur_price", 0) >= effective_vwap * (1 + margin / 100):
                 score += 5
+
+        # v1.3: 신규상장 보너스
+        if item.get("is_new_listing", False):
+            score += 10
 
         return score
 
@@ -438,12 +534,13 @@ class DayTradingScanner:
                 f"조건 충족 종목 없음"
             )
         lines = [f"📡 <b>[ 단타 스캔 결과 ]</b> {now_str}\n"]
-        for i, c in enumerate(candidates[:5], 1):
+        for i, c in enumerate(candidates[:10], 1):   # v1.3: 10개까지 표시
             tv_str   = f"{c['trading_value']//100_000_000}억"
             vr_str   = f"{c['volume_ratio']:.1f}배" if c["volume_ratio"] > 0 else "N/A"
             vwap_str = f" | VWAP:{c['vwap']:,.0f}" if c["vwap"] > 0 else ""
+            new_str  = " 🆕" if c.get("is_new_listing") else ""   # v1.3
             lines.append(
-                f"<b>{i}. {c['name']}({c['code']})</b>\n"
+                f"<b>{i}. {c['name']}({c['code']})</b>{new_str}\n"
                 f"   현재가: <b>{c['cur_price']:,}원</b> "
                 f"(<b>{c['rise_pct']:+.1f}%</b>)\n"
                 f"   TV:{tv_str} | 거래량:{vr_str}{vwap_str}\n"

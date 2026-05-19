@@ -1975,23 +1975,9 @@ class TelegramBot:
         vr_str   = f"{vr:.1f}배" if vr > 0 else "N/A"
 
         await self.send(
-            f"🟢 <b>[단타 매수 체결]</b>  {now_str}\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"📌 종목: <b>{name} ({code})</b>\n"
-            f"💰 체결가: <b>{price:,}원</b> "
-            f"(<b>{rise:+.1f}%</b>)\n"
-            f"📦 수량: <b>{qty:,}주</b>  "
-            f"투자금: <b>{total_amt:,}원</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"🎯 목표가: <b>{target_price:,}원</b> "
-            f"(+{tp}%)\n"
-            f"🛑 손절가: <b>{stop_price:,}원</b> "
-            f"({sl}%)\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"📊 거래대금: {tv}억  "
-            f"거래량: {vr_str}\n"
-            f"{vwap_str}"
-            f"⭐ 점수: {score}점  [{source}]"
+            f"🟢 <b>[단타 매수]</b>  {now_str}\n"
+            f"<b>{name}</b>({code})  {price:,}원  {qty}주  ({rise:+.1f}%)\n"
+            f"목표 {target_price:,}  손절 {stop_price:,}  [{source}] {score}점"
         )
 
     async def notify_scalp_sell(self, code: str, name: str, qty: int,
@@ -2041,20 +2027,9 @@ class TelegramBot:
 
         await self.send(
             f"{result_icon} <b>[단타 {result_txt}]</b>  {now_str}\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"📌 종목: <b>{name} ({code})</b>\n"
-            f"💸 매도가: <b>{price:,}원</b>\n"
-            f"📦 수량: <b>{qty:,}주</b>  "
-            f"회수금: <b>{total_recv:,}원</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"📈 매수가 → 매도가\n"
-            f"   {buy_price:,}원 → {price:,}원\n"
-            f"   수익률: <b>{profit_pct:+.2f}%</b>\n"
-            f"💵 총손익: {profit_amt:+,}원\n"
-            f"🏦 수수료+세금: -{cost['total_cost']:,}원\n"
-            f"✅ <b>실손익: {profit_amt - cost['total_cost']:+,}원</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"{reason_icon} 사유: {reason}"
+            f"<b>{name}</b>({code})  {buy_price:,}→{price:,}원\n"
+            f"{profit_pct:+.2f}%  실손익: <b>{profit_amt - cost['total_cost']:+,}원</b>  ({qty}주)\n"
+            f"{reason_icon} {reason}"
         )
 
         # ── 장부 자동 기록 ────────────────────────────────────
