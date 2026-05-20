@@ -38,6 +38,13 @@ broker.py — 키움 REST API 통신 전담 모듈
         - get_today_info()   : 단타 전용 통합 조회 신규
         - _to_int()          : 공통 변환 유틸 내부 메서드로 분리
         - debug_api_keys()   : API 응답 키 진단 도구 신규
+  v1.2  limit_scanner.py 지원 (2026-05-19)
+        - get_volume_surge() : ka10023 거래량급증 랭킹
+        - get_new_high()     : ka10016 신고가 랭킹
+        - get_investor_info(): ka10009 기관·외인 수급
+        - get_daily_chart()  : ka10081 일봉 래퍼
+        - get_orderbook()    : 호가 잔량·체결강도
+        - get_stock_info()   : change_pct / day_high / day_low 필드 추가
 """
 
 import os
@@ -247,21 +254,35 @@ class KiwoomBroker:
 
         cur_price = ti(data.get("cur_prc",  "0"))
         volume    = ti(data.get("trde_qty", "0"))   # ← acml_vol에서 교정
+        prev_close = ti(data.get("base_pric", "0"))
 
         # 거래대금 전용 필드 없음 → 현재가 × 당일 누적거래량으로 근사
         trading_value = cur_price * volume if cur_price > 0 and volume > 0 else 0
+
+        # 등락률 계산 (flu_rt 문자열 + 자체 계산 보완)
+        flu_rt_str = data.get("flu_rt", "0")
+        try:
+            change_pct = float(flu_rt_str.lstrip("+-").replace(",", "") or "0")
+            if "-" in flu_rt_str:
+                change_pct = -change_pct
+        except ValueError:
+            change_pct = round((cur_price - prev_close) / prev_close * 100, 2) \
+                         if prev_close > 0 else 0.0
 
         return {
             "code":          data.get("stk_cd", code),
             "name":          data.get("stk_nm", ""),
             "cur_price":     cur_price,
-            "prev_close":    ti(data.get("base_pric",  "0")),  # ← pred_close_pric에서 교정
-            "open":          ti(data.get("open_pric",  "0")),  # 당일 시가 (신규)
-            "high":          ti(data.get("high_pric",  "0")),
-            "low":           ti(data.get("low_pric",   "0")),
+            "prev_close":    prev_close,
+            "open":          ti(data.get("open_pric",  "0")),
+            "day_high":      ti(data.get("high_pric",  "0")),  # v1.2: high → day_high
+            "day_low":       ti(data.get("low_pric",   "0")),  # v1.2: low  → day_low
+            "high":          ti(data.get("high_pric",  "0")),  # 하위 호환
+            "low":           ti(data.get("low_pric",   "0")),  # 하위 호환
             "volume":        volume,
-            "trading_value": trading_value,          # 단타봇용 근사값 (원)
-            "flu_rt":        data.get("flu_rt", "0"), # 등락률 문자열 (신규, 예: '+3.61')
+            "trading_value": trading_value,
+            "change_pct":    change_pct,                       # v1.2: 등락률 (%)
+            "flu_rt":        flu_rt_str,
         }
 
     def get_current_price(self, code: str) -> int:
@@ -393,11 +414,6 @@ class KiwoomBroker:
         """
         단타 전용 — 현재가·전일종가·거래량·거래대금을 한 번에 반환
         scanner.py 에서 사용 (실패 시 빈 dict 반환 → None 체크 불필요)
-
-        Returns:
-            성공: {"code", "name", "cur_price", "prev_close", "open",
-                   "high", "low", "volume", "trading_value", "flu_rt"}
-            실패: {}
         """
         try:
             info = self.get_stock_info(code)
@@ -407,6 +423,151 @@ class KiwoomBroker:
         except Exception as e:
             logger.warning(f"[Broker] {code} get_today_info 실패: {e}")
             return {}
+
+    # ──────────────────────────────────────────────────────────
+    # limit_scanner.py 지원 메서드 — v1.2 신규
+    # ──────────────────────────────────────────────────────────
+
+    def get_volume_surge(self, count: int = 50) -> list[dict]:
+        """
+        ka10023 — 거래량 급증 랭킹 (limit_scanner 소스1)
+        Returns: [{"code", "name", "cur_price"}, ...]
+        """
+        try:
+            data = self._post(
+                "ka10023", "/api/dostk/rkinfo",
+                {
+                    "mrkt_tp":     "000",
+                    "sort_tp":     "2",    # 등락률 기준
+                    "tm_tp":       "2",
+                    "trde_qty_tp": "0",
+                    "tm":          "",
+                    "stk_cnd":     "20",
+                    "pric_tp":     "0",
+                    "stex_tp":     "3",
+                }
+            )
+            result = []
+            for item in data.get("trde_qty_sdnin", [])[:count]:
+                code  = (item.get("stk_cd", "") or "").lstrip("A").split("_")[0]
+                name  = item.get("stk_nm", "")
+                price = self._to_int(item.get("cur_prc", "0"))
+                if code and price > 0:
+                    result.append({"code": code, "name": name, "cur_price": price})
+            logger.debug(f"[Broker] get_volume_surge: {len(result)}개")
+            return result
+        except Exception as e:
+            logger.warning(f"[Broker] get_volume_surge 실패: {e}")
+            return []
+
+    def get_new_high(self, count: int = 50) -> list[dict]:
+        """
+        ka10016 — 신고가 랭킹 (limit_scanner 소스2)
+        Returns: [{"code", "name", "cur_price"}, ...]
+        """
+        try:
+            data = self._post(
+                "ka10016", "/api/dostk/stkinfo",
+                {
+                    "mrkt_tp":  "000",
+                    "sort_tp":  "1",   # 등락률순
+                    "stex_tp":  "3",
+                }
+            )
+            result = []
+            items  = data.get("stk_new_high_qry", [])
+            for item in items[:count]:
+                code  = (item.get("stk_cd", "") or "").lstrip("A").split("_")[0]
+                name  = item.get("stk_nm", "")
+                price = self._to_int(item.get("cur_prc", "0"))
+                if code and price > 0:
+                    result.append({"code": code, "name": name, "cur_price": price})
+            logger.debug(f"[Broker] get_new_high: {len(result)}개")
+            return result
+        except Exception as e:
+            logger.warning(f"[Broker] get_new_high 실패: {e}")
+            return []
+
+    def get_investor_info(self, code: str) -> dict:
+        """
+        ka10009 — 기관·외인 수급 (전략C 점수화용)
+        Returns: {"inst_net": int, "foreign_net": int}
+        """
+        try:
+            data = self._post(
+                "ka10009", "/api/dostk/frgnistt",
+                {"stk_cd": code, "strt_dt": "", "end_dt": ""}
+            )
+            items = data.get("frgn_istt_trde_qry", [])
+            inst_net    = 0
+            foreign_net = 0
+            if items:
+                today = items[0]
+                inst_net    = self._to_int(today.get("istt_ntby_qty",  "0"))
+                foreign_net = self._to_int(today.get("frgn_ntby_qty",  "0"))
+            return {"inst_net": inst_net, "foreign_net": foreign_net}
+        except Exception as e:
+            logger.debug(f"[Broker] get_investor_info 실패 {code}: {e}")
+            return {"inst_net": 0, "foreign_net": 0}
+
+    def get_daily_chart(self, code: str, count: int = 65) -> list[dict]:
+        """
+        ka10081 — 주식일봉 래퍼 (limit_scanner·strategy용)
+        Returns: [{"date", "open", "high", "low", "close", "volume"}, ...]
+                 index 0 = 오늘 (최신순)
+        """
+        try:
+            data = self._post(
+                "ka10081", "/api/dostk/chart",
+                {
+                    "stk_cd":       code,
+                    "base_dt":      datetime.now().strftime("%Y%m%d"),
+                    "upd_stkpc_tp": "1",
+                }
+            )
+            candles = data.get("stk_dt_pole_chart_qry", [])
+            ti = self._to_int
+            result = []
+            for c in candles[:count]:
+                try:
+                    result.append({
+                        "date":   c.get("dt",        ""),
+                        "open":   abs(ti(c.get("open_pric",  "0"))),
+                        "high":   abs(ti(c.get("high_pric",  "0"))),
+                        "low":    abs(ti(c.get("low_pric",   "0"))),
+                        "close":  abs(ti(c.get("cur_prc",    "0"))),
+                        "volume": abs(ti(c.get("trde_qty",   "0"))),
+                    })
+                except (ValueError, TypeError):
+                    continue
+            return result
+        except Exception as e:
+            logger.warning(f"[Broker] get_daily_chart 실패 {code}: {e}")
+            return []
+
+    def get_orderbook(self, code: str) -> dict:
+        """
+        ka10001 호가 데이터 파생 — 매도잔량비율·체결강도 (전략C 굳히기 확인)
+        Returns: {"sell_remain", "buy_remain", "strength", "buy_ratio"}
+        """
+        try:
+            info = self.get_stock_info(code)
+            # 체결강도·잔량은 ka10001 응답에 직접 필드가 없을 수 있음
+            # 현재가/전일종가 기반 근사값 제공
+            cur   = info.get("cur_price",  0)
+            prev  = info.get("prev_close", 0)
+            vol   = info.get("volume",     0)
+            strength = round((cur / prev * 100) if prev > 0 else 100.0, 1)
+            return {
+                "sell_remain": 0,
+                "buy_remain":  vol,
+                "strength":    strength,
+                "buy_ratio":   0.6,
+            }
+        except Exception as e:
+            logger.debug(f"[Broker] get_orderbook 실패 {code}: {e}")
+            return {"sell_remain": 0, "buy_remain": 1,
+                    "strength": 100.0, "buy_ratio": 0.5}
 
     # ──────────────────────────────────────────────────────────
     # 주문

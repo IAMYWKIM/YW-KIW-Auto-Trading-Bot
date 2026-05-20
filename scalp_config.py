@@ -69,18 +69,24 @@ DEFAULTS: dict[str, Any] = {
         "max_positions":         3,              # 최대 동시 보유 종목 수
         "position_size_pct":     20,             # 종목당 투자 비율 (가용 현금의 %)
 
-        # VWAP 필터 — 가격이 VWAP 이상일 때만 진입 (상승 모멘텀 확인)
-        "use_vwap_filter":       True,           # True: 현재가 > VWAP 조건 추가
-        "vwap_margin_pct":       0.0,            # VWAP 대비 최소 % (0 = 같거나 이상)
-        "vwap_top_n":            10,             # v1.3 VWAP 계산 상위 N개 (기존 5개)
-        "new_listing_vwap_tolerance_pct": -5.0,  # v1.3 신규상장 VWAP 허용 범위 (%)
+        # VWAP 관련 — v2.0: VWAP 완전 제거로 이 설정들은 무시됨 (하위 호환용 유지)
+        "use_vwap_filter":       False,          # v2.0: VWAP 미사용 (scanner에서 제거)
+        "vwap_margin_pct":       0.0,
+        "vwap_top_n":            10,
+        "new_listing_vwap_tolerance_pct": -5.0,
+
+        # v2.0: 순수 모멘텀 점수 임계값 (scanner._score 최대 100점 + Fib 15점)
+        "min_entry_score":       35,             # 기본 35점 이상 진입 (보수적: 40~50)
+
+        # v1.2: 손절 종목별 쿨다운 (전략 전체 멈춤 대신)
+        "loss_cooldown_min":     60,             # 손절 후 해당 종목 재진입 금지 (분)
 
         # 동일 종목 재진입 쿨다운
         "cooldown_sec":          300,            # 동일 종목 매도 후 5분간 재진입 금지
 
-        # 장 초반 가중치 — 09:00~09:30 매수 신호는 신뢰도 높음
-        "early_bird_end_time":   "09:30",        # 장 초반 기준 시각
-        "early_bird_bonus":      10,             # 초반 진입 시 점수 보너스
+        # 장 초반 가중치
+        "early_bird_end_time":   "09:30",
+        "early_bird_bonus":      10,
     },
 
     # ── EXIT: 청산 조건 ────────────────────────────────────────
@@ -115,7 +121,8 @@ DEFAULTS: dict[str, Any] = {
         "daily_loss_hard_stop":  True,
 
         # 연속 손절 방지
-        "max_consecutive_loss":  3,
+        # v1.2: 종목별 쿨다운으로 대체 — 전략 전체 멈춤은 높은 값 설정
+        "max_consecutive_loss":  10,            # v1.2: 3→10 (종목별 쿨다운이 기본 방어)
         "consecutive_loss_cooldown_min": 30,
 
         # 포지션 크기 안전장치

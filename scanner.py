@@ -1,36 +1,32 @@
 """
 scanner.py — 키움 국내주식 단타 자동매매 종목 스캐너
-v1.3: 신규상장 종목 감지 + 스캔 풀 확대 + VWAP 완화
+v2.0: VWAP 완전 제거 + 급등 신호 기반 순수 모멘텀 스캐너
 
-[v1.2 → v1.3 핵심 변경]
-  문제1: 신규상장 종목(상장 60일 미만)이 스캔 풀에 안 잡히는 문제
-         → _source_new_listing() 소스 추가 (ka10016 신고가 기반)
-  문제2: 상위 5개 VWAP 계산 제한 → 탐색 기회 부족
-         → scalp_config scan.vwap_top_n 설정 추가 (기본 10개)
-  문제3: 신규상장 종목 VWAP 하회로 무조건 거부
-         → 상장 N일 미만 종목은 VWAP 필터 완화 (tolerance 적용)
-  문제4: 상승률 15~20% 구간 점수 낮음 (8점)
-         → 신규상장 종목 보너스 점수 +10점 추가
+[v1.x → v2.0 전면 개편]
+  VWAP 제거 이유:
+    VWAP은 장중 누적 평균이라 고점 이후 항상 현재가 < VWAP
+    → 눌림 매매 자체가 구조적으로 불가능 (코스모로보틱스·주성엔지니어링 미포착 원인)
 
-[v1.1 → v1.2 핵심 변경]
-  문제: 캐시 미스 시 종목마다 ka10081(일봉) + ka10080(VWAP) 개별 호출
-        → 30종목 × 2 API = 60회 호출, 사실상 무한 대기
-  해결:
-    ① _get_prev_day_volumes() — scan() 루프 내 개별 호출 완전 제거
-       캐시 없으면 volume_ratio=0 처리 (중간 점수, 필터 통과)
-       init_daily() 호출 시에만 캐시 구축
-    ② VWAP — 필터 통과한 최종 후보 상위 N개만 계산
-    ③ 소스간 딜레이 1초 유지 (429 방지)
-    ④ 상세 조회 429 재시도 유지 (2초→4초→6초)
+  새 점수 체계 (최대 100점):
+    ① 거래대금 폭발  30점: 오늘 거래대금이 기준 이상
+    ② 거래량 폭발    25점: 전일 대비 거래량 배수
+    ③ 가격 모멘텀    20점: 전일종가 대비 상승률 구간
+    ④ 고점 눌림 Fib  15점: 당일 고가 대비 눌림 구간 (Fib 0.236~0.382)
+    ⑤ 시간대         10점: 09:00~09:30 장초반 가중
 
-[API 호출 횟수 비교]
-  v1.2: 소스3회 + 상세30회 + VWAP5회              = 38회
-  v1.3: 소스4회 + 상세30회 + VWAP10회 + 신규5회   = 49회 (신규상장 포함)
+  환기종목 제외:
+    - 거래정지 예고 / 관리종목 / 투자주의 환기종목
+    - ka10016 조회 시 관련 플래그 체크
+    - 주가 이상: 상한가(+29.9%)·하한가(-29.9%) 근접 제외
+
+[API 호출 횟수]
+  소스4회 + 상세30회 = 34회 (VWAP 계산 완전 제거로 절감)
+  소요시간: 약 10~12초
 """
 
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, date as _date
 from typing import Optional
 
 import pytz
@@ -55,48 +51,38 @@ def _safe_int(s, default: int = 0) -> int:
 
 class DayTradingScanner:
     """
-    단타 종목 스캐너
+    단타 종목 스캐너 v2.0 — 순수 모멘텀 기반, VWAP 없음
 
     [권장 사용법]
-        scanner = DayTradingScanner(broker, scalp_cfg)
-
-        # 장 시작 전 1회만 (전일 거래량 캐시 구축)
-        scanner.init_daily()
-
-        # 30초 주기로 반복 호출
-        candidates = scanner.scan(held_codes=[], blacklist=set())
-
-        # 장마감 후 테스트 시
-        candidates = scanner.scan(force_time=True)
-
-    [init_daily() 미호출 시]
-        volume_ratio=0 으로 처리 → 거래량 비율 필터 통과, 점수는 중간값
-        실 거래에서는 반드시 init_daily() 먼저 호출 권장
+      scanner = DayTradingScanner(broker, scalp_cfg)
+      scanner.init_daily()          # 08:50 장전 — 전일 거래량 캐시
+      candidates = scanner.scan()   # 30초 주기 호출
     """
 
     def __init__(self, broker: KiwoomBroker, scalp_cfg: ScalpConfig):
-        self.broker             = broker
-        self.cfg                = scalp_cfg
-        self._prev_vol_cache: dict[str, int]  = {}   # init_daily() 로 채워짐
-        self._listing_date:   dict[str, str]  = {}   # 신규상장 종목 상장일 캐시
-        self.last_scan_result:  list[dict]    = []
+        self.broker            = broker
+        self.cfg               = scalp_cfg
+        self._prev_vol_cache:  dict[str, int] = {}   # code → 전일 거래량
+        self._listing_date:    dict[str, str] = {}   # code → 상장일 YYYYMMDD
+        self._caution_cache:   set[str]       = set()  # 환기종목 캐시
+        self.last_scan_result: list[dict]     = []
 
     # ──────────────────────────────────────────────────────────
-    # 1. 장전 초기화 (08:50 1회 호출 — 선택적)
+    # 1. 장전 초기화
     # ──────────────────────────────────────────────────────────
 
-    def init_daily(self):
+    def init_daily(self) -> None:
         """
-        전일 거래량 캐시 구축
-        → 거래량 비율(오늘 거래량 / 전일 거래량) 계산에 사용
-        → 미호출 시 volume_ratio=0 처리 (필터 통과, 중간 점수)
+        08:50 장전 — 전일 거래량 캐시 구축 + 환기종목 캐시 갱신
         """
-        logger.info("[Scanner] init_daily 시작 — 전일 거래량 캐시 구축")
+        logger.info("[Scanner] 장전 초기화 시작")
         self._prev_vol_cache.clear()
-        cfg = self.cfg.get_scan()
+        self._caution_cache.clear()
 
         try:
-            candidates = self._fetch_rank_list(sort_tp="1", count=100)
+            cfg        = self.cfg.get_scan()
+            candidates = self._source_rise()[:50]
+
             for i, item in enumerate(candidates):
                 if i % 10 == 0:
                     logger.info(f"[Scanner] 초기화 {i+1}/{len(candidates)}")
@@ -105,12 +91,38 @@ class DayTradingScanner:
                 if prev and prev["prev_volume"] > 0:
                     self._prev_vol_cache[item["code"]] = prev["prev_volume"]
 
+            # 환기종목 캐시 (ka10016 기반 — 관리종목 플래그)
+            self._refresh_caution_cache()
+
             logger.info(
                 f"[Scanner] init_daily 완료 — "
-                f"캐시 {len(self._prev_vol_cache)}개 종목"
+                f"거래량 캐시 {len(self._prev_vol_cache)}개 / "
+                f"환기종목 {len(self._caution_cache)}개"
             )
         except Exception as e:
             logger.error(f"[Scanner] init_daily 실패: {e}")
+
+    def _refresh_caution_cache(self) -> None:
+        """환기종목(관리종목·투자주의) 캐시 갱신"""
+        try:
+            data = self.broker._post(
+                "ka10016", "/api/dostk/stkinfo",
+                {
+                    "mrkt_tp": "000",
+                    "sort_tp": "1",
+                    "ntl_tp":  "1",   # 필수 파라미터
+                    "stex_tp": "3",
+                }
+            )
+            for item in data.get("stk_new_high_qry", []):
+                if (item.get("adm_yn",   "N") == "Y" or
+                    item.get("atten_yn", "N") == "Y" or
+                    item.get("halt_yn",  "N") == "Y"):
+                    code = _clean_code(item.get("stk_cd", "").lstrip("A"))
+                    if code:
+                        self._caution_cache.add(code)
+        except Exception as e:
+            logger.debug(f"[Scanner] 환기종목 캐시 갱신 실패 (무시): {e}")
 
     # ──────────────────────────────────────────────────────────
     # 2. 메인 스캔
@@ -123,38 +135,29 @@ class DayTradingScanner:
         force_time: bool                = False,
     ) -> list[dict]:
         """
-        장중 급등 종목 실시간 스캔 (v1.2 — 빠른 버전)
+        장중 급등 종목 실시간 스캔 v2.0
 
-        소요시간: 약 12~15초 (API 호출 38회)
-
-        Args:
-            held_codes : 보유 중인 종목 코드 (제외)
-            blacklist  : 쿨다운 종목 집합 (제외)
-            force_time : True 시 entry_end_time 시간 제한 무시
-                         (장마감 후 테스트, 텔레그램 수동 실행)
+        변경: VWAP 제거, 환기종목 제외, 순수 모멘텀 점수
+        소요시간: 약 10~12초
         """
         cfg     = self.cfg.get_scan()
         now_str = datetime.now(KST).strftime("%H:%M")
 
-        # 진입 마감 체크
         if not force_time and now_str >= cfg["entry_end_time"]:
-            logger.info(
-                f"[Scanner] 진입마감 ({now_str} >= {cfg['entry_end_time']}) "
-                f"스킵. 테스트는 force_time=True"
-            )
+            logger.info(f"[Scanner] 진입마감 ({now_str}) 스킵")
             return []
 
         held_codes = set(held_codes or [])
         blacklist  = blacklist or set()
 
-        # ── Step 1: 후보 풀 수집 (소스간 1초 딜레이) ─────────
+        # ── Step 1: 후보 풀 수집 ────────────────────────────
         src1 = self._source_rise()
         time.sleep(1.0)
         src2 = self._source_trading_val()
         time.sleep(1.0)
         src3 = self._source_volume()
         time.sleep(1.0)
-        src4 = self._source_new_listing()   # v1.3 신규상장 소스 추가
+        src4 = self._source_new_listing()
 
         pool: dict[str, dict] = {}
         for item in src1 + src2 + src3 + src4:
@@ -164,24 +167,28 @@ class DayTradingScanner:
 
         logger.info(
             f"[Scanner] 풀 {len(pool)}개 "
-            f"(소스1:{len(src1)} 소스2:{len(src2)} "
-            f"소스3:{len(src3)} 소스4_신규:{len(src4)})"
+            f"(등락률:{len(src1)} 거래대금:{len(src2)} "
+            f"거래량:{len(src3)} 신규상장:{len(src4)})"
         )
 
-        # ── Step 2: 1차 빠른 필터 (API 호출 없음) ────────────
+        # ── Step 2: 1차 빠른 필터 ────────────────────────────
         pre: list[dict] = []
         for code, item in pool.items():
             if code in held_codes or code in blacklist:
+                continue
+            # 환기종목 제외 (v2.0)
+            if code in self._caution_cache:
+                logger.debug(f"[Scanner] {code} 환기/관리종목 제외")
                 continue
             price = item.get("cur_price", 0)
             if not (cfg["min_price"] <= price <= cfg["max_price"]):
                 continue
             pre.append(item)
 
-        pre = pre[:cfg.get("max_candidates", 30)]
+        pre = pre[:cfg.get("max_candidates", 40)]
         logger.info(f"[Scanner] 1차 필터: {len(pre)}개")
 
-        # ── Step 3: 2차 상세 필터 (ka10001, 429 재시도) ──────
+        # ── Step 3: 상세 필터 ────────────────────────────────
         api_delay = cfg.get("api_delay_sec", 0.3)
         passed: list[dict] = []
 
@@ -197,42 +204,43 @@ class DayTradingScanner:
             prev_close = detail["prev_close"]
             volume     = detail["volume"]
             today_tv   = detail["trading_value"]
+            day_high   = detail.get("day_high", cur_price)
+            day_low    = detail.get("day_low",  cur_price)
 
             if prev_close <= 0 or cur_price <= 0:
                 continue
 
             rise_pct = (cur_price - prev_close) / prev_close * 100
 
-            # 상승률 필터
+            # ── 상승률 필터 ────────────────────────────────────
             if not (cfg["min_rise_pct"] <= rise_pct <= cfg["max_rise_pct"]):
-                logger.debug(f"[Scanner] {code} ❌ 상승률 {rise_pct:.1f}%")
+                logger.debug(f"[Scanner] {code} 상승률 {rise_pct:.1f}% 제외")
                 continue
 
-            # 상한가 근접 제외
+            # ── 상한가 근접 제외 ───────────────────────────────
             if cfg.get("exclude_upper_limit", True) and rise_pct >= 29.0:
-                logger.debug(f"[Scanner] {code} ❌ 상한가 근접 {rise_pct:.1f}%")
+                logger.debug(f"[Scanner] {code} 상한가 근접 {rise_pct:.1f}% 제외")
                 continue
 
-            # 거래대금 필터
+            # ── 거래대금 필터 ──────────────────────────────────
             if today_tv < cfg["min_trading_value"]:
                 logger.debug(
-                    f"[Scanner] {code} ❌ 거래대금 "
-                    f"{today_tv//100_000_000}억 "
-                    f"< {cfg['min_trading_value']//100_000_000}억"
+                    f"[Scanner] {code} 거래대금 "
+                    f"{today_tv//100_000_000}억 미달"
                 )
                 continue
 
-            # 거래량 비율 — 캐시에 있을 때만 필터, 없으면 0(중간 점수)으로 통과
+            # ── 거래량 비율 ────────────────────────────────────
             prev_vol     = self._prev_vol_cache.get(code, 0)
-            volume_ratio = (
-                round(volume / prev_vol, 1) if prev_vol > 0 else 0.0
-            )
-            # init_daily() 호출된 경우에만 거래량 비율 필터 적용
+            volume_ratio = round(volume / prev_vol, 1) if prev_vol > 0 else 0.0
             if prev_vol > 0 and volume_ratio < cfg["volume_ratio_min"]:
-                logger.debug(
-                    f"[Scanner] {code} ❌ 거래량비율 "
-                    f"{volume_ratio}배 < {cfg['volume_ratio_min']}배"
-                )
+                logger.debug(f"[Scanner] {code} 거래량 {volume_ratio}배 미달")
+                continue
+
+            # ── 환기종목 실시간 2차 체크 (detail에 플래그 있을 경우) ──
+            if detail.get("adm_yn") == "Y" or detail.get("atten_yn") == "Y":
+                logger.debug(f"[Scanner] {code} 환기종목 실시간 제외")
+                self._caution_cache.add(code)
                 continue
 
             passed.append({
@@ -244,57 +252,36 @@ class DayTradingScanner:
                 "volume":         volume,
                 "volume_ratio":   volume_ratio,
                 "trading_value":  today_tv,
-                "vwap":           0.0,   # Step 4에서 상위만 채움
+                "day_high":       day_high,
+                "day_low":        day_low,
                 "source":         item.get("source", ""),
                 "scan_time":      now_str,
-                "is_new_listing": item.get("is_new_listing", False),  # v1.3
+                "is_new_listing": item.get("is_new_listing", False),
+                "vwap":           0.0,   # 하위 호환 (사용 안 함)
             })
-            logger.info(
-                f"[Scanner] ✅ {detail['name']}({code}) "
-                f"상승:{rise_pct:.1f}% "
-                f"TV:{today_tv//100_000_000}억 "
-                f"거래량:{volume_ratio}배"
-            )
 
-        # ── Step 4: 1차 점수 정렬 후 상위 N개만 VWAP 계산 ───
-        # VWAP 없이 먼저 점수화 → 상위 N개만 ka10080 호출
+        # ── Step 4: 점수화 및 정렬 ──────────────────────────
         for c in passed:
             c["score"] = self._score(c, now_str)
+
         passed.sort(key=lambda x: x["score"], reverse=True)
 
-        entry_cfg  = self.cfg.get_entry()
-        vwap_top_n = entry_cfg.get("vwap_top_n", 10)   # v1.3: 기본 10개
-        # 신규상장 VWAP 허용 범위 (예: -5 → VWAP 대비 -5%까지 허용)
-        new_listing_vwap_tol = entry_cfg.get("new_listing_vwap_tolerance_pct", -5.0)
-
-        if entry_cfg.get("use_vwap_filter", True) and passed:
-            logger.info(
-                f"[Scanner] 상위 {min(vwap_top_n, len(passed))}개 VWAP 계산 중..."
-            )
-            for c in passed[:vwap_top_n]:
-                time.sleep(api_delay)
-                vwap = self.broker.calc_vwap(c["code"])
-                c["vwap"]  = round(vwap, 0)
-                c["score"] = self._score(
-                    c, now_str,
-                    new_listing_vwap_tol=new_listing_vwap_tol
-                )
-            # VWAP 반영 후 재정렬
-            passed.sort(key=lambda x: x["score"], reverse=True)
-
-        self.last_scan_result = passed
         logger.info(
-            f"[Scanner] 완료 — "
-            f"풀:{len(pool)} → 2차:{len(passed)}개 최종"
+            f"[Scanner] 최종 후보: {len(passed)}개 "
+            f"(최고점: {passed[0]['score']}점/{passed[0]['name']} "
+            f"if passed else '')"
+            if passed else
+            f"[Scanner] 최종 후보: 0개"
         )
+        self.last_scan_result = passed
         return passed
 
     # ──────────────────────────────────────────────────────────
     # 3. 소스 수집
     # ──────────────────────────────────────────────────────────
 
-    def _fetch_rank_list(self, sort_tp: str, count: int = 50) -> list[dict]:
-        """ka10023 순위 조회 — sort_tp: 1=거래량, 2=등락률, 3=거래대금"""
+    def _fetch_rank_list(self, sort_tp: str) -> list[dict]:
+        """ka10023 랭킹 API 공통 호출"""
         try:
             data = self.broker._post(
                 "ka10023", "/api/dostk/rkinfo",
@@ -310,19 +297,15 @@ class DayTradingScanner:
                 }
             )
             result = []
-            for item in data.get("trde_qty_sdnin", [])[:count]:
+            for item in data.get("trde_qty_sdnin", []):
                 code  = _clean_code(item.get("stk_cd", "").lstrip("A"))
                 name  = item.get("stk_nm", "")
                 price = _safe_int(item.get("cur_prc", "0"))
                 if code and price > 0:
-                    result.append({
-                        "code":      code,
-                        "name":      name,
-                        "cur_price": price,
-                    })
+                    result.append({"code": code, "name": name, "cur_price": price})
             return result
         except Exception as e:
-            logger.warning(f"[Scanner] ka10023 sort_tp={sort_tp} 실패: {e}")
+            logger.warning(f"[Scanner] 랭킹 조회 실패 sort_tp={sort_tp}: {e}")
             return []
 
     def _source_rise(self) -> list[dict]:
@@ -344,63 +327,54 @@ class DayTradingScanner:
         return result
 
     def _source_new_listing(self) -> list[dict]:
-        """
-        v1.3 신규 — 신규상장 종목 소스 (ka10016 신고가 + 상장일 필터)
-
-        상장 60일 이내 종목 중 당일 5% 이상 상승 중인 종목을 수집.
-        RISE_RANK에서 누락되는 신규상장 강세 종목을 보완한다.
-        """
+        """신규상장 종목 소스 (상장 N일 이내)"""
         cfg            = self.cfg.get_scan()
-        new_days_limit = cfg.get("new_listing_days", 60)   # 상장 N일 이내
+        new_days_limit = cfg.get("new_listing_days", 60)
         result         = []
-        today_str      = datetime.now(KST).strftime("%Y%m%d")
 
         try:
-            data = self.broker._post(
+            data  = self.broker._post(
                 "ka10016", "/api/dostk/stkinfo",
                 {
-                    "mrkt_tp":  "000",   # 전체
-                    "sort_tp":  "1",     # 등락률순
-                    "new_tp":   "1",     # 신규상장 필터
-                    "stex_tp":  "3",
+                    "mrkt_tp": "000",
+                    "sort_tp": "1",
+                    "new_tp":  "1",
+                    "ntl_tp":  "1",   # 필수 파라미터 추가
+                    "stex_tp": "3",
                 }
             )
             items = data.get("stk_new_high_qry", [])
             for item in items[:30]:
-                code     = _clean_code(item.get("stk_cd", "").lstrip("A"))
-                name     = item.get("stk_nm", "")
-                price    = _safe_int(item.get("cur_prc", "0"))
-                list_dt  = item.get("list_dt", "")   # 상장일 YYYYMMDD
+                code    = _clean_code(item.get("stk_cd", "").lstrip("A"))
+                name    = item.get("stk_nm", "")
+                price   = _safe_int(item.get("cur_prc", "0"))
+                list_dt = item.get("list_dt", "")
 
                 if not code or price <= 0:
                     continue
-
-                # 상장일 캐시에 저장
                 if list_dt:
                     self._listing_date[code] = list_dt
 
-                # 상장 경과일 계산
                 if list_dt and len(list_dt) == 8:
                     try:
-                        from datetime import date
-                        listed = date(int(list_dt[:4]),
-                                      int(list_dt[4:6]),
-                                      int(list_dt[6:8]))
-                        elapsed_days = (date.today() - listed).days
+                        listed       = _date(int(list_dt[:4]),
+                                             int(list_dt[4:6]),
+                                             int(list_dt[6:8]))
+                        elapsed_days = (_date.today() - listed).days
                         if elapsed_days > new_days_limit:
-                            continue   # 너무 오래된 종목 제외
+                            continue
                     except Exception:
                         pass
 
                 result.append({
-                    "code"           : code,
-                    "name"           : name,
-                    "cur_price"      : price,
-                    "source"         : "NEW_LISTING",
-                    "is_new_listing" : True,
+                    "code":            code,
+                    "name":            name,
+                    "cur_price":       price,
+                    "source":          "NEW_LISTING",
+                    "is_new_listing":  True,
                 })
         except Exception as e:
-            logger.warning(f"[Scanner] 신규상장 소스 실패: {e}")
+            logger.warning(f"[Scanner] 신규상장 소스 실패 (무시하고 계속): {e}")
 
         logger.info(f"[Scanner] 소스4(신규상장): {len(result)}개")
         return result
@@ -411,17 +385,8 @@ class DayTradingScanner:
 
     def _get_stock_detail_with_retry(self, code: str,
                                       max_retry: int = 3) -> Optional[dict]:
-        """
-        ka10001 상세 조회 — 429 시 2초→4초→6초 재시도
-
-        [v1.2 수정] get_today_info() 대신 get_stock_info() 직접 호출
-        get_today_info()는 내부에서 예외를 잡아 {} 반환 → retry 불가
-        get_stock_info()는 예외를 그대로 raise → retry 정상 동작
-        """
         for attempt in range(max_retry):
             try:
-                # get_today_info() 대신 get_stock_info() 직접 호출
-                # → 429 예외가 그대로 raise되어 아래 except에서 포착됨
                 info = self.broker.get_stock_info(code)
                 if not info or info.get("cur_price", 0) <= 0:
                     return None
@@ -429,19 +394,19 @@ class DayTradingScanner:
             except Exception as e:
                 err_str = str(e)
                 if "429" in err_str and attempt < max_retry - 1:
-                    wait = 2.0 * (attempt + 1)   # 2초 → 4초 → 6초
+                    wait = 2.0 * (attempt + 1)
                     logger.warning(
-                        f"[Scanner] {code} 429 — "
-                        f"{attempt+1}/{max_retry}회 재시도 ({wait:.0f}초 대기)"
+                        f"[Scanner] {code} 429 {attempt+1}/{max_retry}회 "
+                        f"({wait:.0f}초 대기)"
                     )
                     time.sleep(wait)
                 else:
-                    logger.debug(f"[Scanner] {code} 조회 최종 실패: {e}")
+                    logger.debug(f"[Scanner] {code} 조회 실패: {e}")
                     return None
         return None
 
     def _get_prev_day_volumes(self, code: str) -> Optional[dict]:
-        """ka10081 일봉 2개로 전일 거래량 조회 — init_daily()에서만 사용"""
+        """ka10081 일봉 — 전일 거래량 조회 (init_daily 전용)"""
         try:
             data = self.broker._post(
                 "ka10081", "/api/dostk/chart",
@@ -463,64 +428,110 @@ class DayTradingScanner:
             return None
 
     # ──────────────────────────────────────────────────────────
-    # 5. 점수화
+    # 5. 점수화 v2.0 — VWAP 제거, 순수 모멘텀 5신호
     # ──────────────────────────────────────────────────────────
 
-    def _score(
-        self,
-        item        : dict,
-        now_str     : str,
-        new_listing_vwap_tol: float = -5.0,
-    ) -> int:
+    def _score(self, item: dict, now_str: str) -> int:
         """
-        단타 후보 점수화 (최대 115점)
-          거래대금   40점: 200억+ =40 / 100억+ =30 / 50억+ =20
-          거래량비율 30점: 10배+ =30 / 5배+ =20 / 3배+ =10 / 캐시없음 =15
-          모멘텀    20점: 10~15% =20 / 7~10% =15 / 3~7% =10 / 15~20% =8
-          시간대    10점: 09:00~09:30 =10 / ~10:30 =7 / ~13:00 =3
-          VWAP보너스 +5점: 현재가 >= VWAP
-          신규상장  +10점: 상장 60일 이내 종목 (v1.3)
+        단타 후보 순수 모멘텀 점수 (최대 100점)
+
+        ① 거래대금 폭발 (30점): 오늘 얼마나 거래됐나
+           200억+ =30 / 100억+ =25 / 50억+ =18 / 10억+ =10 / 그 이하 =3
+
+        ② 거래량 폭발 (25점): 전일 대비 몇 배나 터졌나
+           10배+ =25 / 5배+ =20 / 3배+ =13 / 2배+ =8 / 캐시없음 =12
+
+        ③ 가격 모멘텀 (20점): 전일 대비 상승률 구간
+           10~15% =20 / 7~10% =16 / 5~7% =12 / 15~20% =10 / 20~29% =8 / 3~5% =6
+
+        ④ 당일 고가 눌림 Fib (15점): 고점 이후 눌림 깊이
+           Fib 0.236~0.382 황금구간 =15 / 0.382~0.618 =10 / 0~0.236 =5
+           (고점 = 현재가: 눌림 없음 = 0점 / 당일 움직임 3% 미만 = 0점)
+
+        ⑤ 시간대 (10점): 장 초반일수록 모멘텀 강함
+           09:00~09:30 =10 / 09:30~10:00 =8 / 10:00~11:30 =5 / 그 이후 =2
+
+        보너스:
+           신규상장 60일 이내 +5점
         """
         score = 0
 
+        # ① 거래대금
         tv = item.get("trading_value", 0)
-        if   tv >= 20_000_000_000: score += 40
-        elif tv >= 10_000_000_000: score += 30
-        elif tv >=  5_000_000_000: score += 20
-        else:                      score += 5
+        if   tv >= 20_000_000_000: score += 30
+        elif tv >= 10_000_000_000: score += 25
+        elif tv >=  5_000_000_000: score += 18
+        elif tv >=  1_000_000_000: score += 10
+        else:                      score += 3
 
+        # ② 거래량 배수
         vr = item.get("volume_ratio", 0)
-        if   vr >= 10: score += 30
+        if   vr >= 10: score += 25
         elif vr >= 5:  score += 20
-        elif vr >= 3:  score += 10
-        elif vr == 0:  score += 15   # 캐시 없음 → 중간값
+        elif vr >= 3:  score += 13
+        elif vr >= 2:  score += 8
+        elif vr == 0:  score += 12   # 캐시 없음 → 중간값 (패널티 없음)
 
+        # ③ 가격 모멘텀
         rise = item.get("rise_pct", 0)
-        if   10.0 <= rise <= 15.0: score += 20
-        elif  7.0 <= rise < 10.0:  score += 15
-        elif  3.0 <= rise <  7.0:  score += 10
-        elif 15.0 <  rise < 20.0:  score += 8
-        elif 20.0 <= rise < 29.0:  score += 5   # v1.3: 20% 이상도 부분 점수
+        if   10.0 <= rise < 15.0: score += 20
+        elif  7.0 <= rise < 10.0: score += 16
+        elif  5.0 <= rise <  7.0: score += 12
+        elif 15.0 <= rise < 20.0: score += 10
+        elif 20.0 <= rise < 29.0: score += 8
+        elif  3.0 <= rise <  5.0: score += 6
 
+        # ④ 당일 고가 대비 눌림 — Fib 구간 점수
+        score += self._fib_pullback_score(item)
+
+        # ⑤ 시간대
         if   "09:00" <= now_str < "09:30": score += 10
-        elif now_str < "10:30":            score += 7
-        elif now_str < "13:00":            score += 3
+        elif "09:30" <= now_str < "10:00": score += 8
+        elif "10:00" <= now_str < "11:30": score += 5
+        else:                              score += 2
 
-        # VWAP 보너스 — 신규상장은 tolerance 적용
-        vwap = item.get("vwap", 0)
-        if vwap > 0:
-            is_new = item.get("is_new_listing", False)
-            margin = self.cfg.get_entry().get("vwap_margin_pct", 0.0)
-            # 신규상장: VWAP보다 tolerance% 아래까지 허용
-            effective_vwap = vwap * (1 + (new_listing_vwap_tol / 100)) if is_new else vwap
-            if item.get("cur_price", 0) >= effective_vwap * (1 + margin / 100):
-                score += 5
-
-        # v1.3: 신규상장 보너스
+        # 신규상장 보너스
         if item.get("is_new_listing", False):
-            score += 10
+            score += 5
 
         return score
+
+    @staticmethod
+    def _fib_pullback_score(item: dict) -> int:
+        """
+        당일 고가 대비 현재가 위치로 Fib 눌림 점수 계산
+
+        핵심 아이디어:
+          코스모로보틱스처럼 11:08 고점 후 Fib 0.382 눌림 → 재상승 패턴
+          VWAP 없이 순수 고가/저가 기반으로 눌림 구간을 감지
+
+        Returns: 0~15점
+        """
+        high = item.get("day_high", 0)
+        low  = item.get("day_low",  0)
+        cur  = item.get("cur_price", 0)
+
+        if high <= 0 or low <= 0 or cur <= 0:
+            return 0
+
+        # 당일 움직임이 3% 미만이면 Fib 의미 없음
+        move_pct = (high - low) / low * 100 if low > 0 else 0
+        if move_pct < 3.0:
+            return 0
+
+        # 현재가가 고점 = 눌림 없음 (상승 중) → 점수 없음
+        if cur >= high * 0.995:
+            return 0
+
+        fib_range = high - low
+        fib236    = high - fib_range * 0.236
+        fib382    = high - fib_range * 0.382
+        fib618    = high - fib_range * 0.618
+
+        if fib236 <= cur < high:   return 5    # 얕은 눌림 (고점 근처)
+        if fib382 <= cur < fib236: return 15   # 황금구간 Fib 0.236~0.382
+        if fib618 <= cur < fib382: return 10   # 깊은 눌림 Fib 0.382~0.618
+        return 0
 
     # ──────────────────────────────────────────────────────────
     # 6. 텔레그램 메시지 포맷
@@ -534,16 +545,16 @@ class DayTradingScanner:
                 f"조건 충족 종목 없음"
             )
         lines = [f"📡 <b>[ 단타 스캔 결과 ]</b> {now_str}\n"]
-        for i, c in enumerate(candidates[:10], 1):   # v1.3: 10개까지 표시
-            tv_str   = f"{c['trading_value']//100_000_000}억"
-            vr_str   = f"{c['volume_ratio']:.1f}배" if c["volume_ratio"] > 0 else "N/A"
-            vwap_str = f" | VWAP:{c['vwap']:,.0f}" if c["vwap"] > 0 else ""
-            new_str  = " 🆕" if c.get("is_new_listing") else ""   # v1.3
+        for i, c in enumerate(candidates[:10], 1):
+            tv_str    = f"{c['trading_value']//100_000_000}억"
+            vr_str    = f"{c['volume_ratio']:.1f}배" if c["volume_ratio"] > 0 else "N/A"
+            new_str   = " 🆕" if c.get("is_new_listing") else ""
+            high_str  = f" 고:{c['day_high']:,}" if c.get("day_high") else ""
             lines.append(
                 f"<b>{i}. {c['name']}({c['code']})</b>{new_str}\n"
                 f"   현재가: <b>{c['cur_price']:,}원</b> "
-                f"(<b>{c['rise_pct']:+.1f}%</b>)\n"
-                f"   TV:{tv_str} | 거래량:{vr_str}{vwap_str}\n"
+                f"(<b>{c['rise_pct']:+.1f}%</b>){high_str}\n"
+                f"   TV:{tv_str} | 거래량:{vr_str}\n"
                 f"   점수:{c['score']}점 | {c['source']}"
             )
         return "\n".join(lines)

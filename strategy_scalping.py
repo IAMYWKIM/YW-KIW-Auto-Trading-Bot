@@ -1,39 +1,20 @@
 """
 strategy_scalping.py — 단타 진입·청산·포지션 관리 전략 엔진
-v1.1: 장중 단타 매매 신호 생성 및 포지션 상태 관리
+v1.2: VWAP 점수화 전환 + 종목별 손절 쿨다운 + Fib 눌림 보너스
 
-[종가베팅 strategy.py와의 역할 분리]
-  strategy.py      → 종가베팅 전용 (ka10081 일봉, 조건A~G, 눌림 등)
-  strategy_scalping.py → 단타 전용 (장중 VWAP, 즉시 진입/청산, 당일 청산 철칙)
-
-[포지션 관리 철학]
-  - 모든 포지션은 data/scalp_positions.json 에 영속화 (GCP 재시작 대비)
-  - 메모리 딕셔너리와 JSON 동기화 → 항상 일치 보장
-  - 당일 고점(day_high) 추적으로 트레일링 스탑 지원
-
-[진입 신호 조건]
-  ① 시간 조건: entry_end_time(13:00) 이전
-  ② 포지션 여유: 현재 보유 < max_positions
-  ③ 가용 현금: 매수 가능 금액 확인
-  ④ 쿨다운: 동일 종목 cooldown_sec 이내 재진입 금지
-  ⑤ VWAP 필터: cur_price >= vwap (상승 추세 확인)
-  ⑥ 일일 손실 한도: daily_loss_limit_pct 이내
-
-[청산 신호 우선순위]
-  1순위: 손절선 도달 (-1.5%)
-  2순위: 트레일링 스탑 (장중 고점 대비 -1.0% 하락, 수익 +1% 이상 시 활성화)
-  3순위: 목표 익절선 도달 (+2.5%)
-  4순위: 부분 익절 (partial_profit_pct 도달 시 50% 매도)
-  5순위: 시간 손절 (매수 후 N분 경과, 수익 없으면 청산)
-  6순위: 강제 청산 (15:20)
+[v1.1 → v1.2 핵심 변경]
+  문제1: VWAP 하회 → 즉시 차단 → 고점 이후 모든 눌림 매매 불가
+         → VWAP을 차단 대신 점수(+10/+5/-5/-15)로 활용
+  문제2: 연속 손절 3회 → 전략 전체 멈춤 → 새 종목도 진입 불가
+         → 손절 종목만 개별 쿨다운 (기본 60분), 전략은 계속 실행
+  문제3: 당일 고점 대비 Fib 눌림 패턴 미감지
+         → _calc_fib_pullback_score(): Fib 0.236/0.382 구간 보너스 +20/+10점
+  문제4: broker.py에 get_volume_surge/get_new_high 없어서 limit_scanner 0개
+         → broker.py v1.2에서 해결
 
 [v1.1 변경]
-  - 매도 API 오류 코드별 자동 처리 추가
-    · 800033(모의투자 수량 부족) → 포지션 강제 삭제
-    · 800034(매도 가능 수량 0) → 포지션 강제 삭제
-    · 연속 매도 실패 3회 → 포지션 강제 삭제
-  - sync_with_account(): 실제 계좌와 포지션 불일치 자동 정리
-  - force_remove_position(): 포지션만 삭제 (주문 없이)
+  - 매도 API 오류 코드별 자동 처리
+  - sync_with_account(), force_remove_position()
 """
 
 import json
@@ -190,8 +171,12 @@ class ScalpStrategy:
         self._daily_pnl: int     = 0
         self._daily_start_cash: int = 0
 
-        # 연속 손절 카운터
+        # 연속 손절 카운터 (전체 — 로그·알림용으로만 유지)
         self._consecutive_loss: int = 0
+
+        # [v1.2] 종목별 손절 쿨다운 {code: 만료_timestamp}
+        # 손절 후 해당 종목만 N분 재진입 금지 (전략 전체는 계속 실행)
+        self._loss_cooldown: dict[str, float] = {}
 
         # [v1.1] 매도 실패 카운터 {code: 연속실패횟수}
         self._sell_fail_count: dict[str, int] = {}
@@ -268,20 +253,39 @@ class ScalpStrategy:
                     f"일일 손실 한도 도달 ({loss_pct:.1f}%)"
                 )
 
-        # ⑥ 연속 손절 한도
-        if self._consecutive_loss >= cfg_risk["max_consecutive_loss"]:
+        # ⑥ 연속 손절 전체 한도 (완전 멈춤 임계값 — 기본 10회)
+        global_loss_limit = cfg_risk.get("max_consecutive_loss", 10)
+        if self._consecutive_loss >= global_loss_limit:
             return self._no_signal(
-                f"연속 손절 {self._consecutive_loss}회 — 쿨다운"
+                f"연속 손절 {self._consecutive_loss}회 — 전략 일시정지"
             )
 
-        # ⑦ VWAP 필터 (현재가 > VWAP)
-        if cfg_entry.get("use_vwap_filter", True) and vwap > 0:
-            margin = cfg_entry.get("vwap_margin_pct", 0.0)
-            vwap_threshold = vwap * (1 + margin / 100)
-            if cur_price < vwap_threshold:
-                return self._no_signal(
-                    f"VWAP 하회 (현재가:{cur_price:,} < VWAP:{vwap:,.0f})"
-                )
+        # ⑥-2 [v1.2] 종목별 손절 쿨다운 체크
+        import time as _time
+        if code in self._loss_cooldown:
+            if _time.time() < self._loss_cooldown[code]:
+                remain = int((self._loss_cooldown[code] - _time.time()) / 60)
+                return self._no_signal(f"손절 쿨다운 {remain}분 남음 ({code})")
+            del self._loss_cooldown[code]
+
+        # ⑦ [v2.0] 순수 모멘텀 점수 판단 (VWAP 완전 제거)
+        #    scanner._score()가 이미 5신호 점수를 계산해서 candidate["score"]에 넣음
+        #    여기선 Fib 눌림 보너스만 추가로 반영
+        fib_bonus  = self._calc_fib_pullback_score(candidate)
+        base_score = candidate.get("score", 50)
+        total_score = base_score + fib_bonus
+        min_score   = cfg_entry.get("min_entry_score", 30)
+
+        logger.info(
+            f"[ScalpStrategy] {name}({code}) 진입점수: "
+            f"스캔기본{base_score} + Fib{fib_bonus:+} = {total_score} "
+            f"(기준 {min_score}점)"
+        )
+
+        if total_score < min_score:
+            return self._no_signal(
+                f"진입 점수 미달 {total_score} < {min_score} (Fib:{fib_bonus:+})"
+            )
 
         # ⑧ 매수 수량 계산
         qty = self.calculate_qty(cur_price, available_cash)
@@ -302,6 +306,38 @@ class ScalpStrategy:
             "qty":    qty,
             "price":  0,        # 0 = 시장가 (단타는 시장가 매수 권장)
         }
+
+    def _calc_fib_pullback_score(self, candidate: dict) -> int:
+        """
+        [v1.2] 당일 고점 대비 피보나치 눌림 구간 점수
+        코스모로보틱스·주성엔지니어링처럼 고점 후 Fib 눌림 매매 포착용
+
+        Fib 0.236 ~ 0.382 구간 (황금구간): +20점
+        Fib 0.382 ~ 0.618 구간 (깊은눌림): +10점
+        Fib 0.618 이하 (과도한눌림):        0점 (패널티 없음)
+        고점 근처 (0 ~ 0.236):              +5점
+        """
+        day_high = candidate.get("day_high", 0)
+        day_low  = candidate.get("day_low",  0)
+        cur      = candidate.get("cur_price", 0)
+
+        if day_high <= day_low or cur <= 0 or day_high <= 0:
+            return 0
+
+        # 당일 움직임이 너무 작으면 Fib 의미 없음 (3% 미만)
+        move_pct = (day_high - day_low) / day_low * 100 if day_low > 0 else 0
+        if move_pct < 3.0:
+            return 0
+
+        fib_range = day_high - day_low
+        fib236    = day_high - fib_range * 0.236
+        fib382    = day_high - fib_range * 0.382
+        fib618    = day_high - fib_range * 0.618
+
+        if fib236 <= cur <= day_high:          return +5   # 얕은 눌림
+        if fib382 <= cur < fib236:             return +20  # 황금구간 0.236~0.382
+        if fib618 <= cur < fib382:             return +10  # 깊은 눌림 0.382~0.618
+        return 0
 
     def calculate_qty(self, cur_price: int, available_cash: int) -> int:
         """매수 수량 계산"""
@@ -521,16 +557,21 @@ class ScalpStrategy:
             self._save_positions()
 
             if is_stop_loss:
-                # ── [v1.2] 손절/트레일링 시 Fib 감시 등록 ──────────
+                # ── [v1.2] 손절 시 종목별 쿨다운 등록 ───────────────
+                import time as _time
+                cooldown_min = self.cfg.get_entry().get("loss_cooldown_min", 60)
+                self._loss_cooldown[code] = _time.time() + cooldown_min * 60
+                logger.info(
+                    f"[ScalpStrategy] {code} 손절 쿨다운 {cooldown_min}분 등록"
+                )
+                # Fib 재진입 감시 등록 (fib_mgr 있을 때)
                 if self.fib_mgr is not None:
                     try:
                         from fib_reentry import FibWatcher
-                        # 현재 종목 정보로 Fib 계산
                         info       = self.broker.get_stock_info(code)
                         today_low  = info.get("low",       sell_price)
                         prev_close = info.get("prev_close", pos.buy_price)
                         today_open = info.get("open",       pos.buy_price)
-
                         watcher = FibWatcher.from_position(
                             code       = code,
                             name       = pos.name,
@@ -542,16 +583,11 @@ class ScalpStrategy:
                         )
                         self.fib_mgr.add(watcher)
                         logger.info(
-                            f"[ScalpStrategy] {code} 손절 → Fib 재진입 감시 등록 "
-                            f"(고점:{pos.day_high:,} "
-                            f"{'갭' if watcher.is_gap_up else '일반'}기준:{watcher.base_price:,})"
+                            f"[ScalpStrategy] {code} Fib 재진입 감시 등록 "
+                            f"(고점:{pos.day_high:,})"
                         )
                     except Exception as e:
                         logger.warning(f"[ScalpStrategy] Fib 감시 등록 실패: {e}")
-                else:
-                    # fib_mgr 미주입 시 쿨다운으로 fallback
-                    import time as _time
-                    self._cooldown[code] = _time.time()
             else:
                 # 익절/강제청산 → 일반 쿨다운만
                 import time as _time
