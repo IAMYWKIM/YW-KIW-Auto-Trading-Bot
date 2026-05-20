@@ -872,6 +872,12 @@ async def job_limit_scan_loop():
     if not assert_trading_day("limit_scan_loop"):
         return
     now_str  = datetime.now(KST).strftime("%H:%M")
+
+    # ── 시간 가드: 장 시간 외 즉시 리턴 ─────────────────────
+    # (자정에도 루프가 실행되던 문제 수정 — limit_scanner.scan()에도 추가)
+    if not ("08:50" <= now_str <= "15:30"):
+        return
+
     scan_cfg = limit_cfg.get_scan()
 
     # ── 보유 포지션 장중 청산 감시 ──────────────────────────

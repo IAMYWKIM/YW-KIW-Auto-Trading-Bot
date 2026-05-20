@@ -93,7 +93,7 @@ body{background:var(--bg);color:var(--text);font-family:'Noto Sans KR',sans-seri
 
 <nav class="sidebar">
   <div class="logo">
-    <div class="ver">v3.1.0</div>
+    <div class="ver">v3.2.0</div>
     <div class="t">키움 자동매매봇</div>
     <div class="s">텔레그램 명령어 가이드</div>
   </div>
@@ -128,12 +128,12 @@ body{background:var(--bg);color:var(--text);font-family:'Noto Sans KR',sans-seri
     <h1>📡 키움 자동매매봇 명령어 가이드</h1>
     <p>GCP Ubuntu · 키움 REST API · 텔레그램 봇 통합 운영 가이드</p>
     <div class="badges">
-      <span class="mb v">v3.1.0</span>
+      <span class="mb v">v3.2.0</span>
       <span class="mb ok">3전략 통합</span>
       <span class="mb ok">종가베팅 A</span>
-      <span class="mb ok">장중단타 B</span>
+      <span class="mb new">단타 5신호 B ★v3.2</span>
       <span class="mb ok">상한가선진입 C</span>
-      <span class="mb new">성과 리포트 ★NEW</span>
+      <span class="mb ok">성과 리포트</span>
     </div>
   </div>
 
@@ -473,26 +473,70 @@ C 한도(30%): 5,052,000원</div>
        전략B — 장중단타
   ════════════════════════════════════════════════════════════════ -->
   <section class="section" id="sec-scalp" hidden>
-    <div class="sec-hdr"><div class="sec-ico" style="background:var(--yellow-bg)">⚡</div><div><h2>전략B — 장중단타</h2><div class="sec-sub">09:00~13:00 급등 종목 당일 매매</div></div></div>
+    <div class="sec-hdr"><div class="sec-ico" style="background:var(--yellow-bg)">⚡</div><div><h2>전략B — 장중단타<span class="sec-new">v3.2 개편</span></h2><div class="sec-sub">VWAP 제거 → 5신호 순수 모멘텀 스캐너 + 환기종목 자동 제외</div></div></div>
+
+    <div class="success">✅ v3.2.0 개편. VWAP 필터가 고점 후 눌림 매매를 원천 차단하던 문제를 해결했습니다. 이제 Fib 황금구간 눌림 종목을 자동으로 포착합니다.</div>
+
+    <div class="card new-card" data-cmd="5신호 점수">
+      <div class="card-hdr" onclick="toggle(this)">
+        <span class="badge b-yellow">점수 구조</span>
+        <div class="card-info"><div class="card-title">5신호 순수 모멘텀 점수 (최대 115점) <span class="new-tag">v3.2</span></div><div class="card-desc">VWAP 완전 제거 — 거래대금·거래량·가격·Fib·시간대 5신호 조합</div></div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="divider"></div>
+        <table class="score-table">
+          <tr><th>신호</th><th>배점</th><th>기준</th></tr>
+          <tr><td>① 거래대금 폭발</td><td>30점</td><td>200억+ =30 / 100억+ =25 / 50억+ =18 / 10억+ =10</td></tr>
+          <tr><td>② 거래량 폭발</td><td>25점</td><td>10배+ =25 / 5배+ =20 / 3배+ =13 / 2배+ =8</td></tr>
+          <tr><td>③ 가격 모멘텀</td><td>20점</td><td>10~15% =20 / 7~10% =16 / 5~7% =12 / 15~20% =10</td></tr>
+          <tr><td>④ Fib 눌림 ★신규</td><td>15점</td><td>고점 대비 Fib 0.236~0.382 =15 / 0.382~0.618 =10 / 얕은눌림 =5</td></tr>
+          <tr><td>⑤ 시간대</td><td>10점</td><td>09:00~09:30 =10 / 09:30~10:00 =8 / 10:00~11:30 =5</td></tr>
+          <tr><td>신규상장 보너스</td><td>+5점</td><td>상장 60일 이내 종목</td></tr>
+        </table>
+        <div class="tip">💡 min_entry_score(기본 35점) 이상이면 진입. /scalp_config set entry.min_entry_score 40 으로 조정 가능.</div>
+      </div>
+    </div>
+
+    <div class="card new-card" data-cmd="환기종목">
+      <div class="card-hdr" onclick="toggle(this)">
+        <span class="badge b-red">환기종목 제외</span>
+        <div class="card-info"><div class="card-title">관리종목·투자주의·거래정지예고 자동 제외 <span class="new-tag">v3.2</span></div><div class="card-desc">장전 초기화 시 캐시 구축 + 상세 조회 시 실시간 2차 체크</div></div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="divider"></div>
+        <div class="param-grid">
+          <span class="param-key">관리종목</span><span class="param-val">adm_yn = Y → 스캔 제외</span>
+          <span class="param-key">투자주의</span><span class="param-val">atten_yn = Y → 스캔 제외</span>
+          <span class="param-key">거래정지예고</span><span class="param-val">halt_yn = Y → 스캔 제외</span>
+        </div>
+        <div class="note">📌 08:50 장전 초기화 시 환기종목 목록을 캐시에 등록합니다.</div>
+      </div>
+    </div>
 
     <div class="card" data-cmd="/scalp_scan">
       <div class="card-hdr" onclick="toggle(this)">
         <span class="badge b-yellow">/scalp_scan</span>
-        <div class="card-info"><div class="card-title">단타 즉시 스캔</div><div class="card-desc">현재 시점의 단타 후보를 즉시 스캔하여 출력합니다.</div></div>
+        <div class="card-info"><div class="card-title">단타 즉시 스캔</div><div class="card-desc">현재 시점의 단타 후보를 5신호 점수로 즉시 스캔하여 출력합니다.</div></div>
         <span class="chevron">▼</span>
       </div>
       <div class="card-body">
         <div class="divider"></div>
         <div class="code-box"><span class="cmd">/scalp_scan</span></div>
-        <div class="output-box">[ 단타 스캔 결과 ] 09:42
+        <div class="output-box">[ 단타 스캔 결과 ] 10:14
 후보 3개 발견
 
-① 알테오젠(196170) 점수:78
-   등락: +8.4% | 거래량비: 5.2배
-   VWAP 돌파 ✓ | 체결강도:187%
+① 코스모로보틱스(439960) 🆕
+   현재가: 61,200원 (+15.4%) 고:68,000
+   TV:284억 | 거래량:8.2배
+   점수:82점 | RISE_RANK
 
-② POSCO홀딩스(005490) 점수:71
-   등락: +5.1% | 거래량비: 3.8배</div>
+② 주성엔지니어링(036930)
+   현재가: 127,500원 (+8.1%) 고:139,000
+   TV:1,240억 | 거래량:5.1배
+   점수:74점 | TV_RANK</div>
+        <div class="tip">💡 ④ Fib 눌림 점수가 붙으면 고점 후 눌림 중인 종목입니다. 가장 좋은 진입 타이밍입니다.</div>
       </div>
     </div>
 
@@ -505,18 +549,12 @@ C 한도(30%): 5,052,000원</div>
       <div class="card-body">
         <div class="divider"></div>
         <div class="code-box"><span class="cmd">/scalp_status</span></div>
-        <div class="output-box">[ 단타 포지션 ]
-알테오젠 20주 @168,000
-현재가 171,200 | +1.9%
-보유시간: 24분
-
-손절선: 165,480 | 익절: 174,720</div>
       </div>
     </div>
 
     <div class="card" data-cmd="/scalp_pause /scalp_resume">
       <div class="card-hdr" onclick="toggle(this)">
-        <span class="badge b-yellow">/scalp_pause</span>
+        <span class="badge b-yellow">/scalp_pause · /scalp_resume</span>
         <div class="card-info"><div class="card-title">단타 신규 진입 일시 정지 / 재개</div><div class="card-desc">신규 매수를 차단하되 기존 포지션 청산 감시는 계속됩니다.</div></div>
         <span class="chevron">▼</span>
       </div>
@@ -524,7 +562,6 @@ C 한도(30%): 5,052,000원</div>
         <div class="divider"></div>
         <div class="code-box"><span class="cmd">/scalp_pause</span>    <span class="cmt"># 신규 진입 중단</span>
 <span class="cmd">/scalp_resume</span>   <span class="cmt"># 재개</span></div>
-        <div class="note">⚠️ /scalp_pause 후에도 보유 포지션 손절·익절은 정상 작동합니다.</div>
       </div>
     </div>
   </section>
@@ -772,17 +809,25 @@ C: 852,000 / 5,040,000원 (17%)
 <span class="cmd">/scalp_config show</span> <span class="arg">scan</span>    <span class="cmt"># 스캔 설정만</span></div>
       </div>
     </div>
-    <div class="card" data-cmd="/scalp_config set">
+    <div class="card new-card" data-cmd="/scalp_config set v3.2">
       <div class="card-hdr" onclick="toggle(this)">
         <span class="badge b-yellow">/scalp_config set</span>
-        <div class="card-info"><div class="card-title">단타 설정 변경</div><div class="card-desc">단타 파라미터를 즉시 변경합니다.</div></div>
+        <div class="card-info"><div class="card-title">단타 설정 변경 <span class="new-tag">v3.2 파라미터 추가</span></div><div class="card-desc">단타 파라미터를 즉시 변경합니다.</div></div>
         <span class="chevron">▼</span>
       </div>
       <div class="card-body">
         <div class="divider"></div>
-        <div class="code-box"><span class="cmd">/scalp_config set</span> <span class="arg">exit.take_profit_pct 1.5</span>
-<span class="cmd">/scalp_config set</span> <span class="arg">exit.stop_loss_pct -1.0</span>
-<span class="cmd">/scalp_config set</span> <span class="arg">entry.max_positions 2</span></div>
+        <div class="code-box"><span class="cmt"># v3.2 신규 파라미터</span>
+<span class="cmd">/scalp_config set</span> <span class="arg">entry.min_entry_score 40</span>    <span class="cmt"># 진입 점수 기준 (기본 35)</span>
+<span class="cmd">/scalp_config set</span> <span class="arg">entry.loss_cooldown_min 60</span>  <span class="cmt"># 손절 종목 쿨다운 (분)</span>
+<span class="cmd">/scalp_config set</span> <span class="arg">risk.max_consecutive_loss 10</span> <span class="cmt"># 전체 멈춤 임계값</span>
+
+<span class="cmt"># 기존 파라미터</span>
+<span class="cmd">/scalp_config set</span> <span class="arg">exit.take_profit_pct 2.5</span>
+<span class="cmd">/scalp_config set</span> <span class="arg">exit.stop_loss_pct -1.5</span>
+<span class="cmd">/scalp_config set</span> <span class="arg">entry.max_positions 3</span>
+<span class="cmd">/scalp_config set</span> <span class="arg">market.caution_max_positions 2</span></div>
+        <div class="tip">💡 min_entry_score를 높이면 거짓 신호가 줄고, 낮추면 더 많은 종목이 진입됩니다.</div>
       </div>
     </div>
   </section>

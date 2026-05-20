@@ -561,8 +561,13 @@ class ScalpStrategy:
                 import time as _time
                 cooldown_min = self.cfg.get_entry().get("loss_cooldown_min", 60)
                 self._loss_cooldown[code] = _time.time() + cooldown_min * 60
+
+                # [v3.2] 손절 종목 당일 완전 블랙리스트 (재매수 방지)
+                # loss_cooldown_min=480(8시간)이면 사실상 당일 재진입 차단
+                self._cooldown[code] = _time.time()   # 일반 쿨다운도 함께 등록
                 logger.info(
-                    f"[ScalpStrategy] {code} 손절 쿨다운 {cooldown_min}분 등록"
+                    f"[ScalpStrategy] {code} 손절 쿨다운 {cooldown_min}분 + "
+                    f"당일 재진입 차단 등록"
                 )
                 # Fib 재진입 감시 등록 (fib_mgr 있을 때)
                 if self.fib_mgr is not None:
@@ -602,7 +607,11 @@ class ScalpStrategy:
 
         self._log_trade(
             code, "SELL", sell_qty, sell_price,
-            net_profit, reason
+            net_profit, reason,
+            buy_price = pos.buy_price,   # profit_amt 계산용 (버그 수정)
+            name      = pos.name,
+            source    = getattr(pos, "source", ""),
+            score     = getattr(pos, "score",  0),
         )
 
         result = {
@@ -687,14 +696,19 @@ class ScalpStrategy:
             logger.info("[ScalpStrategy] 복원할 포지션 없음")
 
     def _log_trade(self, code: str, side: str, qty: int, price: int,
-                   profit: int = 0, reason: str = ""):
-        """당일 매매 이력 기록"""
-        log   = _read_json_safe(DAILY_LOG_FILE, {})
-        today = datetime.now(KST).strftime("%Y-%m-%d")
+                   profit: int = 0, reason: str = "",
+                   buy_price: int = 0, name: str = "",
+                   source: str = "", score: int = 0):
+        """당일 매매 이력 기록 + scalp_trades.json 기록 (profit_amt 버그 수정)"""
+        now_str = datetime.now(KST).strftime("%H:%M:%S")
+        today   = datetime.now(KST).strftime("%Y-%m-%d")
+
+        # ── 1. scalp_daily_log.json (기존 방식 유지) ──────────
+        log = _read_json_safe(DAILY_LOG_FILE, {})
         if today not in log:
             log[today] = []
         log[today].append({
-            "time":   datetime.now(KST).strftime("%H:%M:%S"),
+            "time":   now_str,
             "code":   code,
             "side":   side,
             "qty":    qty,
@@ -703,6 +717,46 @@ class ScalpStrategy:
             "reason": reason,
         })
         _write_json_atomic(DAILY_LOG_FILE, log)
+
+        # ── 2. scalp_trades.json (profit_amt 버그 수정) ────────
+        # SELL 체결 시에만 기록. profit_amt가 0이던 버그: buy_price가 없어서
+        # (sell_price - buy_price) * qty 계산이 0원이 됐던 문제 해결
+        if side == "SELL" and buy_price > 0:
+            trades_file = Path("data/scalp_trades.json")
+            try:
+                trades = _read_json_safe(trades_file, [])
+                if not isinstance(trades, list):
+                    trades = []
+
+                profit_amt  = (price - buy_price) * qty         # 총 손익 (원)
+                profit_pct  = round(
+                    (price - buy_price) / buy_price * 100, 2
+                ) if buy_price > 0 else 0.0
+
+                trades.append({
+                    "id"         : f"{today.replace('-','')}_{code}_{now_str.replace(':','')}",
+                    "date"       : today,
+                    "code"       : code,
+                    "name"       : name,
+                    "buy_price"  : buy_price,
+                    "sell_price" : price,
+                    "qty"        : qty,
+                    "buy_time"   : "",      # add_position에서 채워짐
+                    "sell_time"  : now_str,
+                    "profit_amt" : profit_amt,     # ← 핵심 수정: 실제 계산값
+                    "profit_pct" : profit_pct,
+                    "invest_amt" : buy_price * qty,
+                    "recv_amt"   : price * qty,
+                    "reason"     : reason,
+                    "source"     : source,
+                    "score"      : score,
+                })
+                # 최대 5000건 유지
+                if len(trades) > 5000:
+                    trades = trades[-5000:]
+                _write_json_atomic(trades_file, trades)
+            except Exception as e:
+                logger.warning(f"[ScalpStrategy] scalp_trades 기록 실패: {e}")
 
     # ──────────────────────────────────────────────────────────
     # F. 일일 초기화 / 결산
