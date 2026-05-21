@@ -45,11 +45,18 @@ broker.py — 키움 REST API 통신 전담 모듈
         - get_daily_chart()  : ka10081 일봉 래퍼
         - get_orderbook()    : 호가 잔량·체결강도
         - get_stock_info()   : change_pct / day_high / day_low 필드 추가
+  v1.3  전역 Rate Limiter 추가 (2026-05-21)
+        - _RateLimiter: 초당 최대 4회 API 호출 자동 제어
+        - _post()에 rate_limit() 자동 적용 → 429 방지
+        - 429 발생 시 자동 대기 후 재시도 (5초 대기 최대 2회)
 """
 
 import os
 import json
 import logging
+import threading
+import time
+from collections import deque
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -61,6 +68,58 @@ logger = logging.getLogger(__name__)
 
 DATA_DIR = Path("data")
 DATA_DIR.mkdir(exist_ok=True)
+
+
+# ──────────────────────────────────────────────────────────────
+# 전역 Rate Limiter  v1.3
+# ──────────────────────────────────────────────────────────────
+class _RateLimiter:
+    """
+    슬라이딩 윈도우 + 최소 간격 방식 API 호출 속도 제한기.
+
+    키움 모의투자 API 제한: 초당 5회
+    안전 마진 적용: 초당 4회 (0.25초 최소 간격)
+
+    사용법:
+        _rate_limiter.wait()   # _post() 호출 전 자동 대기
+    """
+    def __init__(self, max_calls: int = 4, period: float = 1.0):
+        self._max_calls     = max_calls
+        self._period        = period
+        self._min_interval  = period / max_calls   # 0.25초
+        self._calls: deque  = deque()
+        self._lock          = threading.Lock()
+        self._last_call     = 0.0
+
+    def wait(self) -> None:
+        """호출 전 필요시 대기 — 초당 max_calls 초과하지 않도록 조절"""
+        with self._lock:
+            now = time.monotonic()
+
+            # ① 최소 간격 보장 (0.25초): 연속 호출 간격 균등화
+            since_last = now - self._last_call
+            if since_last < self._min_interval:
+                time.sleep(self._min_interval - since_last)
+                now = time.monotonic()
+
+            # ② 슬라이딩 윈도우: 1초 내 max_calls 초과 방지
+            while self._calls and now - self._calls[0] >= self._period:
+                self._calls.popleft()
+
+            if len(self._calls) >= self._max_calls:
+                sleep_time = self._period - (now - self._calls[0]) + 0.05
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
+                now = time.monotonic()
+                while self._calls and now - self._calls[0] >= self._period:
+                    self._calls.popleft()
+
+            self._last_call = time.monotonic()
+            self._calls.append(self._last_call)
+
+
+# 프로세스 전역 싱글톤 — 모든 KiwoomBroker 인스턴스가 공유
+_rate_limiter = _RateLimiter(max_calls=4, period=1.0)
 
 
 class KiwoomBroker:
@@ -159,16 +218,46 @@ class KiwoomBroker:
 
     def _post(self, api_id: str, path: str, body: dict,
               retry: bool = True) -> dict:
-        """POST 공통 메서드 — 401 시 토큰 재발급 후 1회 재시도"""
+        """
+        POST 공통 메서드 v1.3
+        - Rate Limiter 자동 적용 (초당 4회 제한)
+        - 401: 토큰 재발급 후 1회 재시도
+        - 429: 자동 대기(5초) 후 2회 재시도
+        """
+        # ── Rate Limiter: 호출 전 자동 대기 ─────────────────────
+        _rate_limiter.wait()
+
         url = f"{self.base_url}{path}"
         try:
             resp = requests.post(
                 url, headers=self._headers(api_id), json=body, timeout=15
             )
+            # 401 토큰 만료 → 재발급 후 재시도
             if resp.status_code == 401 and retry:
                 logger.warning("[Broker] 토큰 만료 → 강제 재발급 후 재시도")
                 self._get_token(force=True)
                 return self._post(api_id, path, body, retry=False)
+
+            # 429 Too Many Requests → 자동 대기 후 재시도 (최대 2회)
+            if resp.status_code == 429:
+                for attempt in range(1, 3):
+                    wait_sec = 5 * attempt
+                    logger.warning(
+                        f"[Broker] 429 Rate Limit [{api_id}] "
+                        f"→ {wait_sec}초 대기 후 재시도 ({attempt}/2)"
+                    )
+                    time.sleep(wait_sec)
+                    _rate_limiter.wait()
+                    resp = requests.post(
+                        url, headers=self._headers(api_id),
+                        json=body, timeout=15
+                    )
+                    if resp.status_code != 429:
+                        break
+                else:
+                    logger.error(f"[Broker] 429 재시도 2회 실패 [{api_id}]")
+                    resp.raise_for_status()
+
             resp.raise_for_status()
             data = resp.json()
             if data.get("return_code") not in (0, None):

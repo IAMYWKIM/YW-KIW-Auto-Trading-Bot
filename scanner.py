@@ -147,6 +147,12 @@ class DayTradingScanner:
             logger.info(f"[Scanner] 진입마감 ({now_str}) 스킵")
             return []
 
+        # 진입 시작 시각 체크 (장초반 변동성 구간 제외)
+        entry_start = cfg.get("entry_start_time", "09:00")
+        if not force_time and now_str < entry_start:
+            logger.info(f"[Scanner] 진입시작 전 ({now_str} < {entry_start}) 스킵")
+            return []
+
         held_codes = set(held_codes or [])
         blacklist  = blacklist or set()
 
@@ -485,10 +491,11 @@ class DayTradingScanner:
         score += self._fib_pullback_score(item)
 
         # ⑤ 시간대
-        if   "09:00" <= now_str < "09:30": score += 10
-        elif "09:30" <= now_str < "10:00": score += 8
-        elif "10:00" <= now_str < "11:30": score += 5
-        else:                              score += 2
+        # 09:30 이전은 entry_start_time으로 스킵되므로 09:30부터 점수 계산
+        if   "09:30" <= now_str < "10:00": score += 10   # 장초반 모멘텀 (변동성 안정 후)
+        elif "10:00" <= now_str < "11:30": score += 7    # 오전 주 시간대
+        elif "11:30" <= now_str < "13:00": score += 4    # 점심 전후
+        else:                              score += 2    # 오후
 
         # 신규상장 보너스
         if item.get("is_new_listing", False):

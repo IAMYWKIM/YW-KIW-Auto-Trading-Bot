@@ -51,6 +51,7 @@ DEFAULTS: dict[str, Any] = {
         # 스캔 타이밍
         "scan_interval_sec":     30,             # 종목 스캔 주기 (초)
         "entry_end_time":        "14:30",        # 신규 진입 마감 — 14:30 이후는 청산만
+        "entry_start_time":      "09:30",        # 신규 진입 시작 — 09:30 이전 변동성 구간 제외
 
         # API 호출 제한
         "api_delay_sec":         0.5,            # 종목당 API 호출 간격 (초) — 모의서버 0.5 권장
@@ -157,7 +158,8 @@ PARAM_DESCRIPTIONS = {
     "scan.min_price":             ("최소 주가 (원)",              "정수",       "1000"),
     "scan.max_price":             ("최대 주가 (원)",              "정수",       "300000"),
     "scan.scan_interval_sec":     ("스캔 주기 (초)",              "정수",       "30"),
-    "scan.entry_end_time":        ("신규 진입 마감",              "HH:MM",      "13:00"),
+    "scan.entry_end_time":        ("신규 진입 마감",              "HH:MM",      "14:30"),
+    "scan.entry_start_time":      ("신규 진입 시작 (장초반 제외)", "HH:MM",      "09:30"),
     "scan.api_delay_sec":         ("API 호출 간격 (초) — 모의:0.5, 실전:0.3",  "실수",       "0.5"),
     "scan.max_candidates":        ("스캔 대상 종목 수",           "정수",       "30"),
     "scan.new_listing_days":      ("신규상장 감지 기간 (일)",      "정수",       "60"),

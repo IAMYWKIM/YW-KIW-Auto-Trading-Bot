@@ -447,32 +447,36 @@ async def job_scalp_pre_market():
     )
 
 
-async def job_scalp_loop():
+async def job_scalp_monitor():
     """
-    30초 주기 — 단타 핵심 루프 (거래일 09:00~15:25만 실행)
-    1. 보유 포지션 청산 감시
-    2. 신규 진입 스캔
+    5초 주기 — 단타 포지션 손절·익절 감시 전용 루프  v3.2
+    ─────────────────────────────────────────────────────
+    30초 루프에서 포지션 감시를 분리.
+    주가가 급락해도 5초 내에 손절 감지 → 설정값(-1.5%)에 근접 체결.
     """
-    # 주말/공휴일 스킵
-    if not assert_trading_day("scalp_loop"):
+    if not assert_trading_day("scalp_monitor"):
         return
 
     now_str = datetime.now(KST).strftime("%H:%M")
-
-    # 장 시간 외 스킵
     if not ("09:00" <= now_str <= "15:25"):
         return
 
-    # ── 보유 포지션 청산 감시 ─────────────────────────────────
     positions = scalp_strategy.get_positions()
+    if not positions:
+        return
+
     for pos in positions:
         try:
             info = await asyncio.to_thread(broker.get_stock_info, pos.code)
             if not info:
                 continue
             cur_price = info["cur_price"]
-            exit_sig  = scalp_strategy.check_exit(pos, cur_price)
 
+            # 당일 고점 갱신
+            if cur_price > pos.day_high:
+                pos.day_high = cur_price
+
+            exit_sig = scalp_strategy.check_exit(pos, cur_price)
             if exit_sig["signal"] == "HOLD":
                 continue
 
@@ -481,7 +485,6 @@ async def job_scalp_loop():
                 broker.sell_order, pos.code, sell_qty, 0, "3"
             )
             if result["success"]:
-                # 매도 성공 시 실패 카운터 초기화
                 scalp_strategy._sell_fail_count.pop(pos.code, None)
                 trade = scalp_strategy.remove_position(
                     pos.code, cur_price, sell_qty, exit_sig["reason"]
@@ -496,34 +499,46 @@ async def job_scalp_loop():
                         score    = getattr(pos, "score",  0),
                     )
                     logger.info(
-                        f"[Scalp] 청산: {pos.name}({pos.code}) "
+                        f"[Monitor] 청산: {pos.name}({pos.code}) "
                         f"{sell_qty}주 {trade['profit']:+,}원 — {exit_sig['reason']}"
                     )
             else:
-                # ── [v1.1] 매도 실패 처리 ─────────────────────────
                 error_code = str(result.get("error_code", ""))
                 error_msg  = str(result.get("error_msg",  ""))
                 handle = scalp_strategy.handle_sell_failure(
                     pos.code, error_code, error_msg
                 )
                 logger.error(
-                    f"[Scalp] 매도 실패: {pos.code} "
-                    f"[{error_code}] {error_msg} → {handle['action']}"
+                    f"[Monitor] 매도 실패: {pos.code} [{error_code}] → {handle['action']}"
                 )
-                # 강제 삭제된 경우 텔레그램 알림
                 if handle["action"] == "force_removed":
                     await bot.send(
                         f"⚠️ <b>[단타 포지션 강제 삭제]</b>\n"
                         f"{pos.name}({pos.code})\n"
-                        f"사유: 매도불가 {error_code or '연속실패'}\n"
-                        f"<i>실제 계좌와 불일치 → 포지션 기록 삭제</i>"
+                        f"사유: 매도불가 {error_code or '연속실패'}"
                     )
-
         except Exception as e:
-            logger.error(f"[Scalp] 포지션 감시 오류 {pos.code}: {e}")
+            logger.error(f"[Monitor] 포지션 감시 오류 {pos.code}: {e}")
 
-    # ── 신규 진입 스캔 ────────────────────────────────────────
-    # bot.scalp_paused 플래그 또는 진입 마감 시각 이후면 스킵
+
+async def job_scalp_loop():
+    """
+    30초 주기 — 단타 신규 진입 스캔 전용 루프  v3.2
+    ─────────────────────────────────────────────────────
+    포지션 감시는 job_scalp_monitor(5초)로 완전 분리.
+    이 루프는 신규 매수 스캔만 담당.
+    """
+    # 주말/공휴일 스킵
+    if not assert_trading_day("scalp_loop"):
+        return
+
+    now_str = datetime.now(KST).strftime("%H:%M")
+
+    # 장 시간 외 스킵
+    if not ("09:00" <= now_str <= "15:25"):
+        return
+
+    # ── 신규 진입 스캔 (포지션 감시는 5초 monitor에서 처리) ──────
     if bot.scalp_paused or now_str >= scalp_cfg.get_scan()["entry_end_time"]:
         return
 
@@ -1136,7 +1151,14 @@ def setup_scheduler(scheduler: AsyncIOScheduler):
     scheduler.add_job(job_scalp_force_exit,      cron(15, 20), id="scalp_force_exit")
     scheduler.add_job(job_scalp_daily_report,    cron(15, 35), id="scalp_daily_report")
 
-    # 단타 핵심 루프 — 30초 주기
+    # 포지션 손절·익절 감시 — 5초 주기 (v3.2: 30초 루프에서 분리)
+    scheduler.add_job(
+        job_scalp_monitor,
+        "interval", seconds=5,
+        id="scalp_monitor"
+    )
+
+    # 신규 진입 스캔 — 30초 주기
     scheduler.add_job(
         job_scalp_loop,
         "interval", seconds=30,
